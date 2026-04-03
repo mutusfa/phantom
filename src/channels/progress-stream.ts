@@ -33,20 +33,30 @@ export function createProgressStream(params: {
 	onError?: (err: unknown) => void;
 	/** Custom finish handler that receives messageId, text, blocks */
 	onFinish?: (messageId: string, text: string, blocks?: unknown[]) => Promise<void>;
+	/** How often to push an elapsed-time heartbeat even with no new tool events. 0 = disabled. Default 5 min. */
+	heartbeatIntervalMs?: number;
 }): ProgressStream {
-	const { adapter, onError, onFinish } = params;
+	const { adapter, onError, onFinish, heartbeatIntervalMs = 5 * 60 * 1000 } = params;
 
 	let messageId: string | null = null;
 	const lines: ProgressLine[] = [];
 	let dirty = false;
 	let timer: ReturnType<typeof setTimeout> | null = null;
+	let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 	let stopped = false;
+	const startedAt = Date.now();
+
+	function elapsedSuffix(): string {
+		const mins = Math.floor((Date.now() - startedAt) / 60_000);
+		return mins >= 1 ? ` (${mins}m elapsed)` : "";
+	}
 
 	function formatProgress(): string {
-		if (lines.length === 0) return "Working on it...";
+		const suffix = elapsedSuffix();
+		if (lines.length === 0) return `Working on it...${suffix}`;
 
 		const visible = lines.slice(-MAX_LINES);
-		const header = "Working on it...";
+		const header = `Working on it...${suffix}`;
 		const activity = visible.map((l) => `> ${l.summary}`).join("\n");
 		return `${header}\n${activity}`;
 	}
@@ -73,6 +83,16 @@ export function createProgressStream(params: {
 		async start(): Promise<void> {
 			try {
 				messageId = await adapter.postMessage("Working on it...");
+				if (heartbeatIntervalMs > 0) {
+					heartbeatTimer = setInterval(() => {
+						if (!stopped) {
+							dirty = true;
+							scheduleFlush();
+						}
+					}, heartbeatIntervalMs);
+					// Don't let the interval prevent process exit
+					heartbeatTimer.unref?.();
+				}
 			} catch (err) {
 				onError?.(err);
 			}
@@ -90,6 +110,10 @@ export function createProgressStream(params: {
 			if (timer) {
 				clearTimeout(timer);
 				timer = null;
+			}
+			if (heartbeatTimer) {
+				clearInterval(heartbeatTimer);
+				heartbeatTimer = null;
 			}
 			if (!messageId) return;
 
@@ -109,6 +133,10 @@ export function createProgressStream(params: {
 			if (timer) {
 				clearTimeout(timer);
 				timer = null;
+			}
+			if (heartbeatTimer) {
+				clearInterval(heartbeatTimer);
+				heartbeatTimer = null;
 			}
 			if (!messageId) return;
 
