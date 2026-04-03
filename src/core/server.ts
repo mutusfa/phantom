@@ -26,6 +26,7 @@ type ChannelHealthProvider = () => Record<string, boolean>;
 type RoleInfoProvider = () => { id: string; name: string } | null;
 type OnboardingStatusProvider = () => string;
 type WebhookHandler = (req: Request) => Promise<Response>;
+type AdoWebhookHandler = (req: Request) => Promise<Response>;
 type PeerHealthProvider = () => Record<string, { healthy: boolean; latencyMs: number; error?: string }>;
 type SchedulerHealthProvider = () => SchedulerHealthSummary | null;
 /**
@@ -60,6 +61,7 @@ let channelHealthProvider: ChannelHealthProvider | null = null;
 let roleInfoProvider: RoleInfoProvider | null = null;
 let onboardingStatusProvider: OnboardingStatusProvider | null = null;
 let webhookHandler: WebhookHandler | null = null;
+let adoWebhookHandler: AdoWebhookHandler | null = null;
 let peerHealthProvider: PeerHealthProvider | null = null;
 let schedulerHealthProvider: SchedulerHealthProvider | null = null;
 let metricsRegistryProvider: MetricsRegistryProvider | null = null;
@@ -92,6 +94,10 @@ export function setOnboardingStatusProvider(provider: OnboardingStatusProvider):
 
 export function setWebhookHandler(handler: WebhookHandler): void {
 	webhookHandler = handler;
+}
+
+export function setAdoWebhookHandler(handler: AdoWebhookHandler): void {
+	adoWebhookHandler = handler;
 }
 
 export function setPeerHealthProvider(provider: PeerHealthProvider): void {
@@ -278,6 +284,13 @@ export function startServer(config: PhantomConfig, startedAt: number): ReturnTyp
 					return Response.json({ status: "error", message: "Webhook channel not configured" }, { status: 503 });
 				}
 				return webhookHandler(req);
+			}
+
+			if (url.pathname === "/ado-webhook") {
+				if (!adoWebhookHandler) {
+					return Response.json({ status: "error", message: "ADO webhook not configured" }, { status: 503 });
+				}
+				return adoWebhookHandler(req);
 			}
 
 			if (url.pathname === "/login/email" && req.method === "POST") {
