@@ -45,6 +45,7 @@ export function updateAfterSession(
 
 	metrics.last_session_at = new Date().toISOString();
 	metrics.sessions_since_consolidation++;
+	metrics.sessions_since_reflection = (metrics.sessions_since_reflection ?? 0) + 1;
 
 	// Recalculate rolling rates
 	metrics.success_rate_7d = calculateRollingRate(metrics.success_count, metrics.session_count);
@@ -81,6 +82,15 @@ export function updateAfterRollback(config: EvolutionConfig): EvolutionMetrics {
 export function resetConsolidationCounter(config: EvolutionConfig): void {
 	const metrics = readMetrics(config);
 	metrics.sessions_since_consolidation = 0;
+	writeMetrics(config, metrics);
+}
+
+/**
+ * Reset the reflection counter after a reflection cycle completes.
+ */
+export function resetReflectionCounter(config: EvolutionConfig): void {
+	const metrics = readMetrics(config);
+	metrics.sessions_since_reflection = 0;
 	writeMetrics(config, metrics);
 }
 
@@ -140,6 +150,7 @@ function defaultMetrics(): EvolutionMetrics {
 		success_rate_7d: 0,
 		correction_rate_7d: 0,
 		sessions_since_consolidation: 0,
+		sessions_since_reflection: 0,
 	};
 }
 

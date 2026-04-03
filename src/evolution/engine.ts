@@ -12,6 +12,7 @@ import {
 	getMetricsSnapshot,
 	readMetrics,
 	resetConsolidationCounter,
+	resetReflectionCounter,
 	updateAfterEvolution,
 	updateAfterRollback,
 	updateAfterSession,
@@ -80,6 +81,15 @@ export class EvolutionEngine {
 		const startTime = Date.now();
 		const judgeCosts = emptyJudgeCosts();
 
+		// Cadence check: skip the reflection pipeline until reflection_interval sessions have passed.
+		// Read pre-update metrics so the check runs before updateAfterSession increments the counter.
+		const preMetrics = readMetrics(this.config);
+		const interval = this.config.cadence.reflection_interval;
+		if ((preMetrics.sessions_since_reflection ?? 0) < interval - 1) {
+			updateAfterSession(this.config, session.outcome, false);
+			return { version: this.getCurrentVersion(), changes_applied: [], changes_rejected: [] };
+		}
+
 		// Step 1: Observation Extraction (LLM or heuristic)
 		let observations: import("./types.ts").SessionObservation[];
 		if (this.llmJudgesEnabled && !this.isDailyCostCapReached()) {
@@ -97,6 +107,8 @@ export class EvolutionEngine {
 		// Step 0: Update session metrics (after extraction so hadCorrections uses observation results)
 		const hadCorrections = observations.some((o) => o.type === "correction");
 		updateAfterSession(this.config, session.outcome, hadCorrections);
+		// Reset reflection counter after updateAfterSession so the next cycle is a full interval.
+		resetReflectionCounter(this.config);
 
 		if (observations.length === 0) {
 			return { version: this.getCurrentVersion(), changes_applied: [], changes_rejected: [] };

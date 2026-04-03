@@ -60,6 +60,7 @@ export type EvolutionMetrics = {
 	success_rate_7d: number;
 	correction_rate_7d: number;
 	sessions_since_consolidation: number;
+	sessions_since_reflection: number;
 };
 
 export type ObservationType = "correction" | "preference" | "error" | "success" | "tool_pattern" | "domain_fact";
