@@ -23,8 +23,10 @@ function makeCost(usd: number, input: number, output: number): AgentCost {
 		totalUsd: usd,
 		inputTokens: input,
 		outputTokens: output,
+		cacheReadTokens: 0,
+		cacheCreationTokens: 0,
 		modelUsage: {
-			"claude-opus-4-6": { inputTokens: input, outputTokens: output, costUsd: usd },
+			"claude-opus-4-6": { inputTokens: input, outputTokens: output, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: usd },
 		},
 	};
 }

@@ -97,4 +97,10 @@ export const MIGRATIONS: string[] = [
 		expires_at TEXT NOT NULL,
 		completed_at TEXT
 	)`,
+
+	// Cache token tracking: add columns to cost_events and sessions
+	`ALTER TABLE cost_events ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE cost_events ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE sessions ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE sessions ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0`,
 ];
