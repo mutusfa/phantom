@@ -177,7 +177,7 @@ function isPathSafe(urlPath: string): string | null {
 }
 
 function buildSetCookieHeader(sessionToken: string): string {
-	return `${COOKIE_NAME}=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE}`;
+	return `${COOKIE_NAME}=${sessionToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE}`;
 }
 
 // Build a Headers object that sets the new cookie AND expires the old
@@ -189,7 +189,7 @@ function buildSetCookieHeader(sessionToken: string): string {
 function buildCookieHeaders(sessionToken: string): Headers {
 	const headers = new Headers();
 	headers.append("Set-Cookie", buildSetCookieHeader(sessionToken));
-	headers.append("Set-Cookie", `${COOKIE_NAME}=; Path=/ui; HttpOnly; Secure; SameSite=Strict; Max-Age=0`);
+	headers.append("Set-Cookie", `${COOKIE_NAME}=; Path=/ui; HttpOnly; SameSite=Strict; Max-Age=0`);
 	return headers;
 }
 
