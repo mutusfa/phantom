@@ -79,6 +79,7 @@ export class AgentRuntime {
 		return this.activeSessions.has(`${channelId}:${conversationId}`);
 	}
 
+
 	async handleMessage(
 		channelId: string,
 		conversationId: string,
@@ -91,7 +92,7 @@ export class AgentRuntime {
 		if (this.activeSessions.has(sessionKey)) {
 			console.warn(`[runtime] Session busy, bouncing concurrent message: ${sessionKey}`);
 			return {
-				text: "Error: session busy (previous execution still running)",
+				text: "I'm still working on your previous message. Please wait.",
 				sessionId: "",
 				cost: emptyCost(),
 				durationMs: 0,
@@ -163,6 +164,7 @@ export class AgentRuntime {
 		}
 	}
 
+
 	private async runQuery(
 		sessionKey: string,
 		channelId: string,
@@ -223,13 +225,13 @@ export class AgentRuntime {
 					...(useResume && session.sdk_session_id ? { resume: session.sdk_session_id } : {}),
 					...(this.mcpServerFactories
 						? {
-								mcpServers: Object.fromEntries(
-									await Promise.all(
-										Object.entries(this.mcpServerFactories).map(
-											async ([k, f]) => [k, await f(mcpFactoryContext)] as const,
-										),
+							mcpServers: Object.fromEntries(
+								await Promise.all(
+									Object.entries(this.mcpServerFactories).map(
+										async ([k, f]) => [k, await f(mcpFactoryContext)] as const,
 									),
 								),
+							),
 							}
 						: {}),
 				},
