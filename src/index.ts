@@ -2,6 +2,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { configureAgentSdkRuntime } from "./agent/agent-sdk.ts";
 import { createReflectiveToolServer } from "./agent/in-process-reflective-tools.ts";
+import { logger } from "./core/logger.ts";
 import { createInProcessToolServer } from "./agent/in-process-tools.ts";
 import { AgentRuntime } from "./agent/runtime.ts";
 import type { RuntimeEvent } from "./agent/runtime.ts";
@@ -19,11 +20,13 @@ import { SlackMetrics } from "./channels/slack-metrics.ts";
 import type { SlackTransport } from "./channels/slack-transport.ts";
 import { createStatusReactionController } from "./channels/status-reactions.ts";
 import { TelegramChannel } from "./channels/telegram.ts";
+import { AdoPrCommentEvent, AdoWebhookHandler } from "./channels/ado-webhook.ts";
 import { WebhookChannel } from "./channels/webhook.ts";
 import { DEFAULT_METADATA_BASE_URL } from "./config/identity-fetcher.ts";
 import { loadChannelsConfig, loadConfig } from "./config/loader.ts";
 import { installShutdownHandlers, onShutdown } from "./core/graceful.ts";
 import {
+	setAdoWebhookHandler,
 	setChannelHealthProvider,
 	setChatHandler,
 	setEvolutionVersionProvider,
@@ -83,10 +86,24 @@ import {
 } from "./ui/serve.ts";
 import { createWebUiToolServer } from "./ui/tools.ts";
 
+// Intercept console.error and console.warn to mirror into the log file.
+// All existing code benefits without needing to import the logger directly.
+const _origError = console.error.bind(console);
+const _origWarn = console.warn.bind(console);
+console.error = (...args: unknown[]) => {
+	_origError(...args);
+	logger.error("console", args.map(String).join(" "));
+};
+console.warn = (...args: unknown[]) => {
+	_origWarn(...args);
+	logger.warn("console", args.map(String).join(" "));
+};
+
 async function main(): Promise<void> {
 	const startedAt = Date.now();
 
 	console.log("[phantom] Starting...");
+	logger.info("phantom", `Starting - log file: ${logger.getPath()}`);
 
 	const config = await loadConfig();
 	await configureAgentSdkRuntime({ agentRuntime: config.agent_runtime, env: process.env });
@@ -292,8 +309,7 @@ async function main(): Promise<void> {
 							createEmailToolServer({
 								agentName: config.name,
 								domain: config.domain ?? "ghostwright.dev",
-								dailyLimit:
-									Number(process.env.PHANTOM_EMAIL_DAILY_CAP) || Number(process.env.PHANTOM_EMAIL_DAILY_LIMIT) || 50,
+								dailyLimit: Number(process.env.PHANTOM_EMAIL_DAILY_LIMIT ?? process.env.PHANTOM_EMAIL_DAILY_CAP) || 50,
 								tenantId,
 								agentId,
 								ownerEmail,
@@ -303,10 +319,25 @@ async function main(): Promise<void> {
 							}),
 					}
 				: {}),
+			...(process.env.ADO_MCP_AUTH_TOKEN && process.env.ADO_ORGANIZATION
+				? {
+						"azure-devops": () => ({
+							type: "stdio" as const,
+							command: "bunx",
+							args: ["-y", "@azure-devops/mcp", process.env.ADO_ORGANIZATION as string, "-a", "envvar"],
+							env: {
+								ADO_MCP_AUTH_TOKEN: process.env.ADO_MCP_AUTH_TOKEN as string,
+								PATH: process.env.PATH ?? "",
+								HOME: process.env.HOME ?? "",
+							},
+						}),
+					}
+				: {}),
 		});
 		const emailStatus = emailEnabled ? ` + email (${useGateway ? "gateway" : "env"})` : "";
+		const adoStatus = process.env.ADO_MCP_AUTH_TOKEN ? " + azure-devops" : "";
 		console.log(
-			`[mcp] MCP server initialized (dynamic tools + scheduler + reflective + web UI + secrets + preview + browser${emailStatus} wired to agent)`,
+			`[mcp] MCP server initialized (dynamic tools + scheduler + reflective + web UI + secrets + preview + browser${emailStatus}${adoStatus} wired to agent)`,
 		);
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : String(err);
@@ -480,6 +511,58 @@ async function main(): Promise<void> {
 		const wh = webhookChannel;
 		setWebhookHandler((req) => wh.handleRequest(req));
 		console.log("[phantom] Webhook channel registered");
+	}
+
+	// Register ADO service hook handler for PR comment events.
+	// Comments are batched per PR and processed after a delay (default 60 min) so
+	// the reviewer can finish commenting before phantom responds.
+	if (process.env.ADO_WEBHOOK_USERNAME && process.env.ADO_WEBHOOK_PASSWORD) {
+		const adoWebhook = new AdoWebhookHandler({
+			username: process.env.ADO_WEBHOOK_USERNAME,
+			password: process.env.ADO_WEBHOOK_PASSWORD,
+		});
+
+		const commentDelayMs = Number(process.env.ADO_COMMENT_DELAY_MS ?? 60 * 60 * 1000);
+		// Map from prId -> { timer, buffered events }
+		const pendingPrBatches = new Map<number, { timer: ReturnType<typeof setTimeout>; events: AdoPrCommentEvent[] }>();
+
+		adoWebhook.onEvent(async (event) => {
+			const existing = pendingPrBatches.get(event.prId);
+			if (existing) {
+				// Already waiting - just append the new comment; timer stays as-is
+				existing.events.push(event);
+				console.log(`[ado-webhook] Buffered comment for PR #${event.prId} (${existing.events.length} total, timer already running)`);
+				return;
+			}
+
+			// First comment for this PR - start the delay timer
+			const events: (typeof event)[] = [event];
+			const timer = setTimeout(async () => {
+				pendingPrBatches.delete(event.prId);
+				const commentList = events.map((e, i) => `${i + 1}. ${e.author}: "${e.comment}"`).join("\n");
+				const prompt =
+					`ADO service hook: ${events.length} comment(s) on PR #${event.prId} ("${event.prTitle}") ` +
+					`in ${event.project}/${event.repo}:\n\n${commentList}\n\n` +
+					`Review the full PR using your azure-devops MCP tools, then address each comment appropriately. ` +
+					`Post reply comments on the PR where warranted, then summarize what you did.`;
+				const conversationId = `ado-webhook:pr-${event.prId}:${Date.now()}`;
+				try {
+					const response = await runtime.handleMessage("ado-webhook", conversationId, prompt);
+					if (slackChannel && channelsConfig?.slack?.owner_user_id) {
+						await slackChannel.sendDm(channelsConfig.slack.owner_user_id, response.text);
+					}
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					console.error(`[ado-webhook] Error processing PR #${event.prId} batch: ${msg}`);
+				}
+			}, commentDelayMs);
+
+			pendingPrBatches.set(event.prId, { timer, events });
+			console.log(`[ado-webhook] Scheduled batch for PR #${event.prId} in ${commentDelayMs / 1000}s`);
+		});
+
+		setAdoWebhookHandler((req) => adoWebhook.handleRequest(req));
+		console.log("[phantom] ADO webhook handler registered");
 	}
 
 	// Register CLI channel (fallback for local dev)
@@ -712,10 +795,18 @@ async function main(): Promise<void> {
 		}
 
 		if (response.cost.totalUsd > 0) {
+			const { cacheReadTokens, cacheCreationTokens, inputTokens, outputTokens } = response.cost;
+			const cacheHitPct =
+				inputTokens > 0 ? Math.round((cacheReadTokens / inputTokens) * 100) : 0;
+			const cacheSuffix =
+				cacheReadTokens > 0 || cacheCreationTokens > 0
+					? ` | cache ${cacheHitPct}% hit (${cacheReadTokens} read / ${cacheCreationTokens} created)`
+					: "";
 			console.log(
 				`[phantom] Cost: $${response.cost.totalUsd.toFixed(4)} | ` +
-					`${response.cost.inputTokens} in / ${response.cost.outputTokens} out | ` +
-					`${(response.durationMs / 1000).toFixed(1)}s`,
+					`${inputTokens} in / ${outputTokens} out` +
+					cacheSuffix +
+					` | ${(response.durationMs / 1000).toFixed(1)}s`,
 			);
 		}
 
