@@ -1,26 +1,24 @@
-# MCP Server Configuration
-# Tokens are SHA-256 hashed. Generate new tokens by running:
-#   bun -e "console.log(crypto.randomUUID())"
-# Then hash them:
-#   bun -e "const h = new Bun.CryptoHasher('sha256'); h.update('YOUR_TOKEN'); console.log('sha256:' + h.digest('hex'))"
-
 tokens:
   - name: admin
-    hash: "sha256:placeholder-generate-on-first-run"
+    hash: sha256:placeholder-generate-on-first-run
     scopes:
       - read
       - operator
       - admin
   - name: operator
-    hash: "sha256:placeholder-generate-on-first-run"
+    hash: sha256:placeholder-generate-on-first-run
     scopes:
       - read
       - operator
   - name: dashboard
-    hash: "sha256:placeholder-generate-on-first-run"
+    hash: sha256:placeholder-generate-on-first-run
     scopes:
       - read
-
+  - name: cursor
+    hash: sha256:754a44bb61b5e313deb4c19fe8ef4a3975c57e1b8fbc28eea2ba1c5c1d5d75e2
+    scopes:
+      - read
+      - operator
 rate_limit:
   requests_per_minute: 60
   burst: 10
