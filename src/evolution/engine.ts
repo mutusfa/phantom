@@ -228,6 +228,7 @@ export class EvolutionEngine {
 		return this.afterSessionInternal(session);
 	}
 
+<<<<<<< HEAD
 	private async afterSessionInternal(session: SessionSummary): Promise<EvolutionResult> {
 		if (this.activeCycle !== null) {
 			this.activeCycleSkipCount += 1;
