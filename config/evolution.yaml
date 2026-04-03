@@ -2,14 +2,11 @@
 
 # How often various evolution operations run
 cadence:
-  # Run reflection after every N sessions (1 = every session)
-  reflection_interval: 1
-  # Run strategy consolidation every N sessions
-  consolidation_interval: 10
-  # Run full config review every N sessions
-  full_review_interval: 50
-  # Run drift check every N sessions
-  drift_check_interval: 20
+  # Nightly cron job is the sole evolution driver - these are set high to disable per-session triggering
+  reflection_interval: 9999
+  consolidation_interval: 9999
+  full_review_interval: 9999
+  drift_check_interval: 9999
 
 # Validation gate thresholds
 gates:

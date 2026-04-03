@@ -1,11 +1,26 @@
 {
-  "version": 0,
-  "parent": null,
-  "timestamp": "2026-03-25T00:00:00Z",
-  "changes": [],
+  "version": 7,
+  "parent": 6,
+  "timestamp": "2026-04-03T00:00:00.000Z",
+  "changes": [
+    {
+      "file": "domain-knowledge.md",
+      "type": "populate",
+      "content": "Added codebase facts, ADO/LinkedIn integrations, and collaborative project notes.",
+      "rationale": "domain-knowledge.md was empty; nightly consolidation from 11 sessions on 2026-04-02.",
+      "session_ids": []
+    },
+    {
+      "file": "strategies/task-patterns.md",
+      "type": "populate",
+      "content": "Added collaborative repo PR pattern and cache-aware cost reporting pattern.",
+      "rationale": "Patterns confirmed across multiple sessions on 2026-04-02.",
+      "session_ids": []
+    }
+  ],
   "metrics_at_change": {
-    "session_count": 0,
-    "success_rate_7d": 0,
-    "correction_rate_7d": 0
+    "session_count": 43,
+    "success_rate_7d": 1,
+    "correction_rate_7d": 0.05
   }
 }
