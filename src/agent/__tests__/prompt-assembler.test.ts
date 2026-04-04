@@ -278,3 +278,26 @@ describe("assemblePrompt UI vocabulary guidance", () => {
 		expect(prompt).toContain("Do not substitute");
 	});
 });
+
+describe("assemblePrompt task completion verification", () => {
+	test("includes verification protocol in instructions", () => {
+		const prompt = assemblePrompt(baseConfig);
+		expect(prompt).toContain("Task Completion Verification");
+		expect(prompt).toContain("minimum required state changes");
+	});
+
+	test("requires verifying state changes actually occurred", () => {
+		const prompt = assemblePrompt(baseConfig);
+		expect(prompt).toContain("Verify those changes actually occurred");
+	});
+
+	test("includes tool registration check", () => {
+		const prompt = assemblePrompt(baseConfig);
+		expect(prompt).toContain("phantom_list_dynamic_tools");
+	});
+
+	test("requires running tests before claiming code change is complete", () => {
+		const prompt = assemblePrompt(baseConfig);
+		expect(prompt).toContain("run the relevant tests before claiming");
+	});
+});
