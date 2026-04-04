@@ -7,6 +7,7 @@ import type { MemoryContextBuilder } from "../memory/context-builder.ts";
 import type { RoleTemplate } from "../roles/types.ts";
 import { CostTracker } from "./cost-tracker.ts";
 import { type AgentCost, type AgentResponse, emptyCost } from "./events.ts";
+import { formatEnvSnapshot, gatherEnvSnapshot } from "./env-snapshot.ts";
 import { createDangerousCommandBlocker, createFileTracker } from "./hooks.ts";
 import { assemblePrompt } from "./prompt-assembler.ts";
 import { SessionStore } from "./session-store.ts";
@@ -125,6 +126,11 @@ export class AgentRuntime {
 				// Memory unavailable, continue without it
 			}
 		}
+
+		// Gather env snapshot for new sessions so the agent immediately knows which
+		// tools are available without spending turns on reconnaissance commands.
+		const envSnapshot = !isResume ? formatEnvSnapshot(gatherEnvSnapshot()) : undefined;
+
 		const appendPrompt = assemblePrompt(
 			this.config,
 			memoryContext,
@@ -132,6 +138,7 @@ export class AgentRuntime {
 			this.roleTemplate ?? undefined,
 			this.onboardingPrompt ?? undefined,
 			undefined,
+			envSnapshot,
 		);
 		const controller = new AbortController();
 		const timeoutMs = (this.config.timeout_minutes ?? 240) * 60 * 1000;
