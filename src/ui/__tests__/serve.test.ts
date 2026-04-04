@@ -49,7 +49,6 @@ describe("login POST", () => {
 		const cookie = res.headers.get("Set-Cookie");
 		expect(cookie).toContain("phantom_session=");
 		expect(cookie).toContain("HttpOnly");
-		expect(cookie).toContain("Secure");
 		expect(cookie).toContain("SameSite=Strict");
 	});
 

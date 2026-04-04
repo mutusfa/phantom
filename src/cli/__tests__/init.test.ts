@@ -5,11 +5,20 @@ import YAML from "yaml";
 // Use a temp directory to avoid clobbering real config
 const TEST_DIR = "/tmp/phantom-init-test";
 
+const SLACK_ENV_KEYS = [
+	"SLACK_BOT_TOKEN",
+	"SLACK_APP_TOKEN",
+	"SLACK_CHANNEL_ID",
+	"SLACK_USER_ID",
+	"OWNER_SLACK_USER_ID",
+];
+
 describe("phantom init", () => {
 	let logSpy: ReturnType<typeof spyOn>;
 	let errorSpy: ReturnType<typeof spyOn>;
 	const logs: string[] = [];
 	let originalCwd: string;
+	const savedSlackEnv: Record<string, string | undefined> = {};
 
 	beforeEach(() => {
 		logs.length = 0;
@@ -17,6 +26,12 @@ describe("phantom init", () => {
 			logs.push(args.map(String).join(" "));
 		});
 		errorSpy = spyOn(console, "error").mockImplementation(() => {});
+
+		// Clear Slack env vars so --yes generates the disabled template
+		for (const key of SLACK_ENV_KEYS) {
+			savedSlackEnv[key] = process.env[key];
+			delete process.env[key];
+		}
 
 		// Clean and create test directory
 		if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
@@ -30,6 +45,15 @@ describe("phantom init", () => {
 		errorSpy.mockRestore();
 		process.chdir(originalCwd);
 		if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+
+		// Restore Slack env vars
+		for (const key of SLACK_ENV_KEYS) {
+			if (savedSlackEnv[key] !== undefined) {
+				process.env[key] = savedSlackEnv[key];
+			} else {
+				delete process.env[key];
+			}
+		}
 	});
 
 	test("prints help with --help", async () => {
