@@ -212,16 +212,23 @@ export class AgentRuntime {
 		const queryModel = resolveAgentRuntimeModel(this.config, this.config.model);
 		const providerEnv = buildAgentRuntimeEnv(this.config, queryModel);
 
-		const runSdkQuery = async (useResume: boolean): Promise<void> => {
+		const runSdkQuery = async (useResume: boolean, contextNote?: string): Promise<void> => {
 			const permissionOptions = permissionOptionsFromConfig(this.config);
 			const mcpFactoryContext = { sessionKey, channelId, conversationId };
+			// When recovering from context overflow, append a brief note so the agent
+			// knows the session was reset rather than being confused by lost history.
+			const finalPrompt = contextNote ? `${appendPrompt}\n\n# Session Recovery\n\n${contextNote}` : appendPrompt;
 			const queryStream = query({
 				prompt: text,
 				options: {
 					model: queryModel,
 					...permissionOptions,
 					settingSources: ["project", "user"],
-					systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: appendPrompt },
+					systemPrompt: {
+						type: "preset" as const,
+						preset: "claude_code" as const,
+						append: finalPrompt,
+					},
 					persistSession: true,
 					effort: this.config.effort,
 					thinking: getThinkingConfig(queryModel),
@@ -290,15 +297,25 @@ export class AgentRuntime {
 				await runSdkQuery(isResume);
 			} catch (err: unknown) {
 				const errorMsg = err instanceof Error ? err.message : String(err);
-				if (isResume && errorMsg.includes("No conversation found")) {
-					console.log(`[runtime] Stale session detected, retrying without resume: ${sessionKey}`);
+				const isStaleSession = isResume && errorMsg.includes("No conversation found");
+
+				const isContextOverflow = !isStaleSession && isContextOverflowError(errorMsg);
+
+				if (isStaleSession || isContextOverflow) {
+					const reason = isStaleSession ? "Stale session detected" : "Context overflow detected";
+					console.log(`[runtime] ${reason}, retrying as fresh session: ${sessionKey}`);
 					this.sessionStore.clearSdkSessionId(sessionKey);
 					sdkSessionId = "";
 					resultText = "";
 					cost = emptyCost();
 					emittedThinking = false;
+
+					const contextNote = isContextOverflow
+						? "The previous conversation exceeded the context window and was reset. Please continue helping with the original request."
+						: undefined;
+
 					try {
-						await runSdkQuery(false);
+						await runSdkQuery(false, contextNote);
 					} catch (retryErr: unknown) {
 						const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
 						resultText = `Error: ${retryMsg}`;
@@ -318,4 +335,20 @@ export class AgentRuntime {
 		this.sessionStore.touch(sessionKey);
 		return { text: resultText, sessionId: sdkSessionId, cost, durationMs: Date.now() - startTime };
 	}
+}
+
+/**
+ * Returns true when an error message indicates the conversation exceeded the
+ * model's context window. Used to trigger a graceful session reset + retry.
+ */
+export function isContextOverflowError(message: string): boolean {
+	const lower = message.toLowerCase();
+	return (
+		lower.includes("prompt is too long") ||
+		lower.includes("maximum context length") ||
+		lower.includes("context_length_exceeded") ||
+		lower.includes("input is too long") ||
+		lower.includes("reduce the length of the messages") ||
+		lower.includes("context window")
+	);
 }
