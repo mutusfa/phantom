@@ -9,7 +9,8 @@ Subsequent runs reuse the saved session without re-logging in.
 Usage:
   python3 linkedin_playwright.py conversations [limit]
   python3 linkedin_playwright.py messages <backend_urn> [limit]
-  python3 linkedin_playwright.py login   # force a fresh login
+  python3 linkedin_playwright.py links <backend_urn>     # extract external URLs from thread
+  python3 linkedin_playwright.py login                   # force a fresh login
 """
 
 import sys
@@ -189,6 +190,27 @@ def get_messages(page, backend_urn: str, limit: int = 20) -> list[dict]:
     return [{"text": raw_text, "format": "raw_dom_text"}]
 
 
+def get_links(page, backend_urn: str) -> list[dict]:
+    """Extract external URLs from a thread (excludes linkedin.com profile links)."""
+    thread_id = backend_urn.split(":")[-1]
+    page.goto(
+        f"https://www.linkedin.com/messaging/thread/{thread_id}/",
+        wait_until="domcontentloaded",
+        timeout=30000,
+    )
+    time.sleep(6)
+
+    links = page.evaluate("""() => {
+        const list = document.querySelector(".msg-s-message-list");
+        if (!list) return [];
+        return Array.from(list.querySelectorAll("a[href]"))
+            .map(a => ({ text: a.innerText.trim(), href: a.href }))
+            .filter(l => l.href && !l.href.includes("linkedin.com/in/"));
+    }""")
+
+    return links
+
+
 def send_message(page, backend_urn: str, message: str) -> dict:
     """Send a message to an existing conversation thread."""
     thread_id = backend_urn.split(":")[-1]
@@ -292,6 +314,14 @@ def run_with_session(command: str, args: list[str]) -> dict:
                 result = get_messages(page, backend_urn, limit)
                 save_session(context)
                 return {"messages": result}
+
+            elif command == "links":
+                if not args:
+                    return {"error": "backend_urn required"}
+                backend_urn = args[0]
+                result = get_links(page, backend_urn)
+                save_session(context)
+                return {"links": result}
 
             elif command == "send":
                 if len(args) < 2:
