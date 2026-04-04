@@ -148,7 +148,10 @@ export class AgentRuntime {
 		let cost: AgentCost = emptyCost();
 		let emittedThinking = false;
 
-		const runSdkQuery = async (useResume: boolean): Promise<void> => {
+		const runSdkQuery = async (useResume: boolean, contextNote?: string): Promise<void> => {
+			// When recovering from context overflow, append a brief note so the agent
+			// knows the session was reset rather than being confused by lost history.
+			const finalPrompt = contextNote ? `${appendPrompt}\n\n# Session Recovery\n\n${contextNote}` : appendPrompt;
 			const queryStream = query({
 				prompt: text,
 				options: {
@@ -159,7 +162,7 @@ export class AgentRuntime {
 					systemPrompt: {
 						type: "preset" as const,
 						preset: "claude_code" as const,
-						append: appendPrompt,
+						append: finalPrompt,
 					},
 					persistSession: true,
 					effort: this.config.effort,
@@ -228,18 +231,23 @@ export class AgentRuntime {
 				const errorMsg = err instanceof Error ? err.message : String(err);
 				const isStaleSession = isResume && errorMsg.includes("No conversation found");
 
-				if (isStaleSession) {
-					// SDK session file is gone (container restart, deploy, etc).
-					// Clear the stale reference and retry as a fresh session.
-					console.log(`[runtime] Stale session detected, retrying without resume: ${sessionKey}`);
+				const isContextOverflow = !isStaleSession && isContextOverflowError(errorMsg);
+
+				if (isStaleSession || isContextOverflow) {
+					const reason = isStaleSession ? "Stale session detected" : "Context overflow detected";
+					console.log(`[runtime] ${reason}, retrying as fresh session: ${sessionKey}`);
 					this.sessionStore.clearSdkSessionId(sessionKey);
 					sdkSessionId = "";
 					resultText = "";
 					cost = emptyCost();
 					emittedThinking = false;
 
+					const contextNote = isContextOverflow
+						? "The previous conversation exceeded the context window and was reset. Please continue helping with the original request."
+						: undefined;
+
 					try {
-						await runSdkQuery(false);
+						await runSdkQuery(false, contextNote);
 					} catch (retryErr: unknown) {
 						const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
 						resultText = `Error: ${retryMsg}`;
@@ -323,4 +331,20 @@ function extractCost(message: {
 		cacheCreationTokens: totalCacheCreation,
 		modelUsage,
 	};
+}
+
+/**
+ * Returns true when an error message indicates the conversation exceeded the
+ * model's context window. Used to trigger a graceful session reset + retry.
+ */
+export function isContextOverflowError(message: string): boolean {
+	const lower = message.toLowerCase();
+	return (
+		lower.includes("prompt is too long") ||
+		lower.includes("maximum context length") ||
+		lower.includes("context_length_exceeded") ||
+		lower.includes("input is too long") ||
+		lower.includes("reduce the length of the messages") ||
+		lower.includes("context window")
+	);
 }
