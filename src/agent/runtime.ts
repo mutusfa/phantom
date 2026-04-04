@@ -10,6 +10,7 @@ import type { RoleTemplate } from "../roles/types.ts";
 import { executeChatQuery } from "./chat-query.ts";
 import { CostTracker } from "./cost-tracker.ts";
 import { type AgentCost, type AgentResponse, emptyCost } from "./events.ts";
+import { formatEnvSnapshot, gatherEnvSnapshot } from "./env-snapshot.ts";
 import { createDangerousCommandBlocker, createFileTracker } from "./hooks.ts";
 import { emitPluginInitSnapshot } from "./init-plugin-snapshot.ts";
 import { type JudgeQueryOptions, type JudgeQueryResult, runJudgeQuery } from "./judge-query.ts";
@@ -187,6 +188,11 @@ export class AgentRuntime {
 				/* Memory unavailable */
 			}
 		}
+
+		// Gather env snapshot for new sessions so the agent immediately knows which
+		// tools are available without spending turns on reconnaissance commands.
+		const envSnapshot = !isResume ? formatEnvSnapshot(gatherEnvSnapshot()) : undefined;
+
 		const appendPrompt = assemblePrompt(
 			this.config,
 			memoryContext,
@@ -194,6 +200,7 @@ export class AgentRuntime {
 			this.roleTemplate ?? undefined,
 			this.onboardingPrompt ?? undefined,
 			undefined,
+			envSnapshot,
 		);
 		const controller = new AbortController();
 		const timeoutMs = (this.config.timeout_minutes ?? 240) * 60 * 1000;

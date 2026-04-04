@@ -73,6 +73,7 @@ export async function executeChatQuery(
 		deps.roleTemplate ?? undefined,
 		deps.onboardingPrompt ?? undefined,
 		undefined,
+		undefined,
 		useMurphContextTransform ? undefined : initialSessionContext,
 	);
 	const transformContext = useMurphContextTransform

@@ -20,6 +20,7 @@ export function assemblePrompt(
 	roleTemplate?: RoleTemplate,
 	onboardingPrompt?: string,
 	dataDir?: string,
+	envSnapshot?: string,
 	chatRuntimeContext?: string,
 ): string {
 	const sections: string[] = [];
@@ -51,6 +52,11 @@ export function assemblePrompt(
 
 	// 2. Environment - what you have access to
 	sections.push(buildEnvironment(config));
+
+	// 2.5. Current session state - real-time tool/memory availability for new sessions
+	if (envSnapshot) {
+		sections.push(envSnapshot);
+	}
 
 	// 3. Security - what you must never do
 	sections.push(buildSecurity());
