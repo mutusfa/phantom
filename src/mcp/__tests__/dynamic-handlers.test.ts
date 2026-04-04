@@ -176,3 +176,68 @@ describe("executeDynamicHandler", () => {
 		expect(text).toContain('"key":"value"');
 	});
 });
+
+describe("marker-based shell execution", () => {
+	test("marker is stripped from successful command output", async () => {
+		const tool: DynamicToolDef = {
+			name: "test_marker_strip",
+			description: "test",
+			inputSchema: {},
+			handlerType: "shell",
+			handlerCode: "echo 'hello world'",
+		};
+
+		const result = await executeDynamicHandler(tool, {});
+		expect(result.isError).toBeUndefined();
+		const text = (result.content[0] as { type: string; text: string }).text;
+		expect(text).toBe("hello world");
+		expect(text).not.toContain("PHANTOM_DONE");
+	});
+
+	test("multi-line output is preserved without marker", async () => {
+		const tool: DynamicToolDef = {
+			name: "test_multiline",
+			description: "test",
+			inputSchema: {},
+			handlerType: "shell",
+			handlerCode: "printf 'line1\\nline2\\nline3'",
+		};
+
+		const result = await executeDynamicHandler(tool, {});
+		const text = (result.content[0] as { type: string; text: string }).text;
+		expect(text).toBe("line1\nline2\nline3");
+		expect(text).not.toContain("PHANTOM_DONE");
+	});
+
+	test("exit inside command still returns error via subshell exit code", async () => {
+		const tool: DynamicToolDef = {
+			name: "test_exit_in_subshell",
+			description: "test",
+			inputSchema: {},
+			handlerType: "shell",
+			handlerCode: "echo 'before'; exit 2",
+		};
+
+		const result = await executeDynamicHandler(tool, {});
+		expect(result.isError).toBe(true);
+		const text = (result.content[0] as { type: string; text: string }).text;
+		expect(text).toContain("Shell error");
+		expect(text).toContain("2");
+	});
+
+	test("output size limit returns error and terminates process", async () => {
+		const tool: DynamicToolDef = {
+			name: "test_output_limit",
+			description: "test",
+			inputSchema: {},
+			handlerType: "shell",
+			// Generate well over 100KB of output
+			handlerCode: "head -c 200000 /dev/zero | tr '\\0' 'x'",
+		};
+
+		const result = await executeDynamicHandler(tool, {});
+		expect(result.isError).toBe(true);
+		const text = (result.content[0] as { type: string; text: string }).text;
+		expect(text).toContain("limit exceeded");
+	});
+});
