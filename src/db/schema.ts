@@ -103,4 +103,17 @@ export const MIGRATIONS: string[] = [
 	`ALTER TABLE cost_events ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE sessions ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE sessions ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0`,
+
+	// Behavior eval: explicit feedback signals (thumbs up/down reactions)
+	`CREATE TABLE IF NOT EXISTS session_feedback (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		session_key TEXT NOT NULL,
+		type TEXT NOT NULL,
+		source TEXT NOT NULL DEFAULT 'reaction',
+		created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`,
+
+	// Behavior eval: per-session intervention counts from heuristic detection
+	`ALTER TABLE sessions ADD COLUMN correction_count INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE sessions ADD COLUMN confirmation_count INTEGER NOT NULL DEFAULT 0`,
 ];

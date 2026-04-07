@@ -177,6 +177,102 @@ describe("executeDynamicHandler", () => {
 	});
 });
 
+describe("marker-based script execution", () => {
+	test("bun script marker is stripped from output", async () => {
+		const tmpFile = "/tmp/phantom-test-marker-strip.ts";
+		await Bun.write(tmpFile, "console.log('hello from script')");
+
+		const tool: DynamicToolDef = {
+			name: "test_script_marker_strip",
+			description: "test",
+			inputSchema: {},
+			handlerType: "script",
+			handlerPath: tmpFile,
+		};
+
+		const result = await executeDynamicHandler(tool, {});
+		expect(result.isError).toBeUndefined();
+		const text = (result.content[0] as { type: string; text: string }).text;
+		expect(text).toBe("hello from script");
+		expect(text).not.toContain("PHANTOM_DONE");
+	});
+
+	test("bun script non-zero exit returns error", async () => {
+		const tmpFile = "/tmp/phantom-test-script-exit.ts";
+		await Bun.write(tmpFile, "process.exit(2)");
+
+		const tool: DynamicToolDef = {
+			name: "test_script_exit",
+			description: "test",
+			inputSchema: {},
+			handlerType: "script",
+			handlerPath: tmpFile,
+		};
+
+		const result = await executeDynamicHandler(tool, {});
+		expect(result.isError).toBe(true);
+		const text = (result.content[0] as { type: string; text: string }).text;
+		expect(text).toContain("Script error");
+		expect(text).toContain("2");
+	});
+
+	test("python script executes and receives TOOL_INPUT", async () => {
+		const tmpFile = "/tmp/phantom-test-python.py";
+		await Bun.write(tmpFile, "import os, json\ndata = json.loads(os.environ['TOOL_INPUT'])\nprint(data['msg'])");
+
+		const tool: DynamicToolDef = {
+			name: "test_python_input",
+			description: "test",
+			inputSchema: {},
+			handlerType: "script",
+			handlerPath: tmpFile,
+		};
+
+		const result = await executeDynamicHandler(tool, { msg: "hello python" });
+		expect(result.isError).toBeUndefined();
+		const text = (result.content[0] as { type: string; text: string }).text;
+		expect(text).toBe("hello python");
+		expect(text).not.toContain("PHANTOM_DONE");
+	});
+
+	test("python script non-zero exit returns error", async () => {
+		const tmpFile = "/tmp/phantom-test-python-exit.py";
+		await Bun.write(tmpFile, "import sys\nsys.exit(3)");
+
+		const tool: DynamicToolDef = {
+			name: "test_python_exit",
+			description: "test",
+			inputSchema: {},
+			handlerType: "script",
+			handlerPath: tmpFile,
+		};
+
+		const result = await executeDynamicHandler(tool, {});
+		expect(result.isError).toBe(true);
+		const text = (result.content[0] as { type: string; text: string }).text;
+		expect(text).toContain("Script error");
+		expect(text).toContain("3");
+	});
+
+	test("script output size limit returns error", async () => {
+		const tmpFile = "/tmp/phantom-test-script-output-limit.py";
+		await Bun.write(tmpFile, "print('x' * 200000)");
+
+		const tool: DynamicToolDef = {
+			name: "test_script_output_limit",
+			description: "test",
+			inputSchema: {},
+			handlerType: "script",
+			handlerPath: tmpFile,
+		};
+
+		const result = await executeDynamicHandler(tool, {});
+		expect(result.isError).toBe(true);
+		const text = (result.content[0] as { type: string; text: string }).text;
+		expect(text).toContain("limit exceeded");
+	});
+});
+
 describe("marker-based shell execution", () => {
 	test("marker is stripped from successful command output", async () => {
 		const tool: DynamicToolDef = {

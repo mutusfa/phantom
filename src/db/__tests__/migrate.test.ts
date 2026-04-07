@@ -32,13 +32,14 @@ describe("runMigrations", () => {
 	test("is idempotent - running twice does not fail", () => {
 		const db = freshDb();
 		runMigrations(db);
+		const countAfterOne = (db.query("SELECT COUNT(*) as count FROM _migrations").get() as { count: number }).count;
 		runMigrations(db);
+		const countAfterTwo = (db.query("SELECT COUNT(*) as count FROM _migrations").get() as { count: number }).count;
 
-		const migrationCount = db.query("SELECT COUNT(*) as count FROM _migrations").get() as { count: number };
-		expect(migrationCount.count).toBe(13);
+		expect(countAfterTwo).toBe(countAfterOne);
 	});
 
-	test("tracks applied migration indices", () => {
+	test("tracks applied migration indices as a contiguous sequence from 0", () => {
 		const db = freshDb();
 		runMigrations(db);
 
@@ -47,6 +48,7 @@ describe("runMigrations", () => {
 			.all()
 			.map((r) => (r as { index_num: number }).index_num);
 
-		expect(indices).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+		const expected = indices.map((_, i) => i);
+		expect(indices).toEqual(expected);
 	});
 });

@@ -39,6 +39,8 @@ export type AgentResponse = {
 	sessionId: string;
 	cost: AgentCost;
 	durationMs: number;
+	/** Path to the JSONL trace file written during this session, if any tool calls were made */
+	traceFile?: string;
 };
 
 export function emptyCost(): AgentCost {

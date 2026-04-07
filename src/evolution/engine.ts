@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { applyApproved } from "./application.ts";
+import { type ToolRegistryAdapter, applyApproved } from "./application.ts";
 import { type EvolutionConfig, loadEvolutionConfig } from "./config.ts";
 import { recordObservations, runConsolidation } from "./consolidation.ts";
 import { ConstitutionChecker } from "./constitution.ts";
@@ -33,6 +33,7 @@ export class EvolutionEngine {
 	private llmJudgesEnabled: boolean;
 	private dailyCostUsd = 0;
 	private dailyCostResetDate = "";
+	private toolRegistry?: ToolRegistryAdapter;
 
 	constructor(configPath?: string) {
 		this.config = loadEvolutionConfig(configPath);
@@ -54,6 +55,11 @@ export class EvolutionEngine {
 
 	usesLLMJudges(): boolean {
 		return this.llmJudgesEnabled;
+	}
+
+	/** Wire in the dynamic tool registry so evolution can register/unregister tools. */
+	setToolRegistry(registry: ToolRegistryAdapter): void {
+		this.toolRegistry = registry;
 	}
 
 	/** Memory consolidation runs outside afterSession() but still needs to respect the daily cap. */
@@ -142,7 +148,7 @@ export class EvolutionEngine {
 
 		// Step 5: Application
 		const metricsSnapshot = getMetricsSnapshot(this.config);
-		const { applied, rejected } = applyApproved(validationResults, this.config, session.session_id, metricsSnapshot);
+		const { applied, rejected } = applyApproved(validationResults, this.config, session.session_id, metricsSnapshot, this.toolRegistry);
 
 		if (applied.length > 0) {
 			updateAfterEvolution(this.config);

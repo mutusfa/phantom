@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { EvolutionConfig } from "./config.ts";
@@ -57,8 +58,14 @@ export function regressionGate(delta: ConfigDelta, goldenSuite: GoldenCase[]): G
 /**
  * Gate 3: Size Gate
  * Ensures no config file exceeds the max line limit after the change is applied.
+ * Skipped for non-config domains (source/skill/tool have different constraints).
  */
 export function sizeGate(delta: ConfigDelta, config: EvolutionConfig): GateResult {
+	const domain = delta.domain ?? "config";
+	if (domain !== "config") {
+		return { gate: "size", passed: true, reason: `Size gate skipped for domain "${domain}".` };
+	}
+
 	const maxLines = config.gates.max_file_lines;
 	const filePath = join(config.paths.config_dir, delta.file);
 
@@ -105,13 +112,18 @@ export function sizeGate(delta: ConfigDelta, config: EvolutionConfig): GateResul
 	};
 }
 
-/** Gate 4: Drift Gate - measures semantic distance from original config. */
+/** Gate 4: Drift Gate - measures semantic distance from original config. Skipped for non-config domains. */
 export function driftGate(
 	delta: ConfigDelta,
 	config: EvolutionConfig,
 	_originalEmbedding?: number[],
 	_proposedEmbedding?: number[],
 ): GateResult {
+	const domain = delta.domain ?? "config";
+	if (domain !== "config") {
+		return { gate: "drift", passed: true, reason: `Drift gate skipped for domain "${domain}".` };
+	}
+
 	const threshold = config.gates.drift_threshold;
 
 	// When embeddings are available, use cosine similarity
@@ -213,7 +225,76 @@ export function safetyGate(delta: ConfigDelta): GateResult {
 	return { gate: "safety", passed: true, reason: "No dangerous patterns detected." };
 }
 
-/** Run all 5 gates on a single delta. */
+/**
+ * Gate 6: Domain Allowed Gate
+ * Checks whether the delta's domain is enabled in the evolution config.
+ * Config domain is always allowed. Source/skill/tool require explicit opt-in.
+ */
+export function domainAllowedGate(delta: ConfigDelta, config: EvolutionConfig): GateResult {
+	const domain = delta.domain ?? "config";
+
+	if (domain === "config") {
+		if (config.capabilities?.allow_config_changes === false) {
+			return {
+				gate: "domain_allowed",
+				passed: false,
+				reason: "Config changes are disabled. Set capabilities.allow_config_changes: true in evolution.yaml.",
+			};
+		}
+		return { gate: "domain_allowed", passed: true, reason: "Config domain is allowed." };
+	}
+
+	if (domain === "source" && !config.capabilities?.allow_source_changes) {
+		return {
+			gate: "domain_allowed",
+			passed: false,
+			reason: "Source code changes are disabled. Set capabilities.allow_source_changes: true in evolution.yaml.",
+		};
+	}
+
+	if (domain === "skill" && !config.capabilities?.allow_skill_creation) {
+		return {
+			gate: "domain_allowed",
+			passed: false,
+			reason: "Skill creation is disabled. Set capabilities.allow_skill_creation: true in evolution.yaml.",
+		};
+	}
+
+	if (domain === "tool" && !config.capabilities?.allow_tool_registration) {
+		return {
+			gate: "domain_allowed",
+			passed: false,
+			reason: "Tool registration is disabled. Set capabilities.allow_tool_registration: true in evolution.yaml.",
+		};
+	}
+
+	return { gate: "domain_allowed", passed: true, reason: `Domain "${domain}" is enabled.` };
+}
+
+/**
+ * Gate 7: Tests Gate
+ * Runs bun typecheck to ensure the codebase is in a clean state before applying
+ * source code changes. Only active for domain="source" deltas.
+ */
+export function testsGate(delta: ConfigDelta): GateResult {
+	const domain = delta.domain ?? "config";
+	if (domain !== "source") {
+		return { gate: "tests", passed: true, reason: "Tests gate only applies to source code changes." };
+	}
+
+	try {
+		execSync("bun run typecheck", { stdio: "pipe", cwd: process.cwd() });
+		return { gate: "tests", passed: true, reason: "Typecheck passed." };
+	} catch (err: unknown) {
+		if (err instanceof Error && "stderr" in err) {
+			const stderr = Buffer.isBuffer(err.stderr) ? err.stderr.toString("utf-8") : String(err.stderr);
+			return { gate: "tests", passed: false, reason: `Typecheck failed: ${stderr.slice(0, 300)}` };
+		}
+		return { gate: "tests", passed: false, reason: `Typecheck error: ${String(err).slice(0, 300)}` };
+	}
+}
+
+/** Run all gates on a single delta. */
 export function validateDelta(
 	delta: ConfigDelta,
 	checker: ConstitutionChecker,
@@ -223,11 +304,13 @@ export function validateDelta(
 	proposedEmbedding?: number[],
 ): ValidationResult {
 	const gates: GateResult[] = [
+		domainAllowedGate(delta, config),
 		constitutionGate(delta, checker),
 		regressionGate(delta, goldenSuite),
 		sizeGate(delta, config),
 		driftGate(delta, config, originalEmbedding, proposedEmbedding),
 		safetyGate(delta),
+		testsGate(delta),
 	];
 
 	const approved = gates.every((g) => g.passed);
@@ -268,6 +351,9 @@ export async function validateAllWithJudges(
 
 	for (const delta of deltas) {
 		const gates: GateResult[] = [];
+
+		// Gate 0: Domain Allowed - synchronous capability check
+		gates.push(domainAllowedGate(delta, config));
 
 		// Gate 1: Constitution - triple Sonnet with minority veto (fail-closed)
 		try {
@@ -332,6 +418,9 @@ export async function validateAllWithJudges(
 			console.warn(`[evolution] Safety judge failed, failing closed: ${msg}`);
 			gates.push({ gate: "safety", passed: false, reason: `Judge error (fail-closed): ${msg}` });
 		}
+
+		// Gate 7: Tests - typecheck for source code deltas (synchronous, deterministic)
+		gates.push(testsGate(delta));
 
 		const approved = gates.every((g) => g.passed);
 		results.push({ delta, gates, approved });

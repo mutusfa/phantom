@@ -2,14 +2,46 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 import type { EvolutionConfig } from "./config.ts";
 import type { ConfigDelta, EvolutionLogEntry, MetricsSnapshot, ValidationResult, VersionChange } from "./types.ts";
+
+/**
+ * Minimal interface for the dynamic tool registry.
+ * Avoids importing the full DynamicToolRegistry to keep the evolution module self-contained.
+ */
+export type ToolRegistryAdapter = {
+	register(params: {
+		name: string;
+		description: string;
+		input_schema?: Record<string, unknown>;
+		handler_type: "script" | "shell";
+		handler_code?: string;
+		handler_path?: string;
+	}): void;
+	unregister(name: string): boolean;
+};
 import { createNextVersion, readVersion, writeVersion } from "./versioning.ts";
 
 /**
- * Apply a validated delta to the config file.
+ * Apply a validated delta to the appropriate target (config file, source file, skill, or tool registry).
  * Returns the change record for version tracking.
  */
-export function applyDelta(delta: ConfigDelta, config: EvolutionConfig): VersionChange {
-	const filePath = join(config.paths.config_dir, delta.file);
+export function applyDelta(delta: ConfigDelta, config: EvolutionConfig, toolRegistry?: ToolRegistryAdapter): VersionChange {
+	const domain = delta.domain ?? "config";
+
+	// Tool registration/unregistration - no file involved
+	if (delta.type === "register_tool" || delta.type === "unregister_tool") {
+		return applyToolDelta(delta, toolRegistry);
+	}
+
+	// Determine base path based on domain
+	let filePath: string;
+	if (domain === "source") {
+		filePath = join(process.cwd(), config.paths.source_dir ?? "src", delta.file);
+	} else if (domain === "skill") {
+		filePath = join(process.cwd(), config.paths.skills_dir ?? ".claude/skills", delta.file);
+	} else {
+		// "config" domain - existing behavior
+		filePath = join(config.paths.config_dir, delta.file);
+	}
 
 	// Ensure directory exists
 	const dir = dirname(filePath);
@@ -27,6 +59,10 @@ export function applyDelta(delta: ConfigDelta, config: EvolutionConfig): Version
 	let newContent: string;
 
 	switch (delta.type) {
+		case "create_file":
+			// Create fresh - does not merge with existing content
+			newContent = delta.content;
+			break;
 		case "append":
 			newContent = currentContent ? `${currentContent}\n${delta.content}` : delta.content;
 			break;
@@ -57,6 +93,41 @@ export function applyDelta(delta: ConfigDelta, config: EvolutionConfig): Version
 		content: delta.content,
 		rationale: delta.rationale,
 		session_ids: delta.session_ids,
+		domain: delta.domain,
+	};
+}
+
+/**
+ * Apply a tool registration/unregistration delta via the tool registry.
+ * For register_tool: delta.content is JSON with tool params.
+ * For unregister_tool: delta.file is the tool name.
+ */
+function applyToolDelta(delta: ConfigDelta, toolRegistry?: ToolRegistryAdapter): VersionChange {
+	if (!toolRegistry) {
+		throw new Error(
+			`Tool delta "${delta.type}" for "${delta.file}" requires a ToolRegistryAdapter but none was provided.`,
+		);
+	}
+
+	if (delta.type === "register_tool") {
+		let params: Parameters<ToolRegistryAdapter["register"]>[0];
+		try {
+			params = JSON.parse(delta.content) as Parameters<ToolRegistryAdapter["register"]>[0];
+		} catch {
+			throw new Error(`register_tool delta for "${delta.file}" has invalid JSON content: ${delta.content.slice(0, 100)}`);
+		}
+		toolRegistry.register(params);
+	} else if (delta.type === "unregister_tool") {
+		toolRegistry.unregister(delta.file);
+	}
+
+	return {
+		file: delta.file,
+		type: delta.type,
+		content: delta.content,
+		rationale: delta.rationale,
+		session_ids: delta.session_ids,
+		domain: delta.domain,
 	};
 }
 
@@ -69,6 +140,7 @@ export function applyApproved(
 	config: EvolutionConfig,
 	sessionId: string,
 	metricsSnapshot: MetricsSnapshot,
+	toolRegistry?: ToolRegistryAdapter,
 ): { applied: VersionChange[]; rejected: Array<{ change: ConfigDelta; reasons: string[] }> } {
 	const approved = results.filter((r) => r.approved);
 	const rejected = results.filter((r) => !r.approved);
@@ -86,7 +158,7 @@ export function applyApproved(
 	// Apply all approved deltas
 	const appliedChanges: VersionChange[] = [];
 	for (const result of approved) {
-		const change = applyDelta(result.delta, config);
+		const change = applyDelta(result.delta, config, toolRegistry);
 		appliedChanges.push(change);
 	}
 

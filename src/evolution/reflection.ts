@@ -190,6 +190,7 @@ export function generateDeltas(critique: CritiqueResult, sessionId: string): Con
 		rationale: change.rationale,
 		session_ids: [sessionId],
 		tier: change.tier,
+		domain: change.domain,
 	}));
 }
 
@@ -236,14 +237,21 @@ export function buildReflectionPrompt(
 
 	return [
 		"You are a reflection agent reviewing a completed session. Your job is to identify",
-		"what went well, what went wrong, and suggest specific, minimal config changes.",
+		"what went well, what went wrong, and suggest specific, minimal changes.",
 		"",
 		"Analyze the session and current configuration. For each suggested change:",
-		'- Specify the file (e.g., "user-profile.md")',
-		'- Specify the type ("append", "replace", or "remove")',
-		"- Provide the exact content to add/replace",
+		'- Specify the domain ("config", "source", "skill", or "tool")',
+		'- Specify the file (e.g., "user-profile.md" for config, "agent/runtime.ts" for source, "my-skill.md" for skill, or the tool name for tool)',
+		'- Specify the type ("append", "replace", "remove", "create_file", "register_tool", or "unregister_tool")',
+		"- Provide the exact content to add/replace (for register_tool: JSON with name/description/handler_type/handler_code)",
 		"- Explain why this change is needed",
 		'- Specify the tier ("immutable", "constrained", or "free")',
+		"",
+		"Domain rules:",
+		'- "config": phantom-config/ markdown files (user-profile.md, domain-knowledge.md, etc.)',
+		'- "source": TypeScript source files under src/ (only if capabilities.allow_source_changes is enabled)',
+		'- "skill": Claude Code skill files under .claude/skills/ (only if capabilities.allow_skill_creation is enabled)',
+		'- "tool": dynamic MCP tool registration (only if capabilities.allow_tool_registration is enabled)',
 		"",
 		"Be conservative. Only suggest changes supported by clear evidence from the session.",
 		"Do not suggest changes to constitution.md (it is immutable).",
@@ -270,8 +278,9 @@ export function getCritiqueJsonSchema(): Record<string, unknown> {
 				items: {
 					type: "object",
 					properties: {
+						domain: { type: "string", enum: ["config", "source", "skill", "tool"] },
 						file: { type: "string" },
-						type: { type: "string", enum: ["append", "replace", "remove"] },
+						type: { type: "string", enum: ["append", "replace", "remove", "create_file", "register_tool", "unregister_tool"] },
 						content: { type: "string" },
 						target: { type: "string" },
 						rationale: { type: "string" },

@@ -1,6 +1,9 @@
 export type ConfigTier = "immutable" | "constrained" | "free";
 
-export type DeltaType = "append" | "replace" | "remove";
+/** Which system owns this delta - determines path resolution and validation rules. */
+export type DeltaDomain = "config" | "source" | "skill" | "tool";
+
+export type DeltaType = "append" | "replace" | "remove" | "create_file" | "register_tool" | "unregister_tool";
 
 export type ConfigDelta = {
 	file: string;
@@ -10,9 +13,11 @@ export type ConfigDelta = {
 	rationale: string;
 	session_ids: string[];
 	tier: ConfigTier;
+	/** Defaults to "config" for backward compatibility. */
+	domain?: DeltaDomain;
 };
 
-export type GateName = "constitution" | "regression" | "size" | "drift" | "safety";
+export type GateName = "constitution" | "regression" | "size" | "drift" | "safety" | "domain_allowed" | "tests";
 
 export type GateResult = {
 	gate: GateName;
@@ -38,6 +43,7 @@ export type VersionChange = {
 	content: string;
 	rationale: string;
 	session_ids: string[];
+	domain?: DeltaDomain;
 };
 
 export type EvolutionVersion = {
@@ -85,6 +91,8 @@ export type SessionSummary = {
 	cost_usd: number;
 	started_at: string;
 	ended_at: string;
+	/** Path to the JSONL trace file for this session (tool calls + inputs) */
+	trace_file?: string;
 };
 
 export type CritiqueResult = {
@@ -99,6 +107,7 @@ export type CritiqueResult = {
 		target?: string;
 		rationale: string;
 		tier: ConfigTier;
+		domain?: DeltaDomain;
 	}>;
 };
 

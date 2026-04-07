@@ -42,6 +42,23 @@ export const EvolutionConfigSchema = z.object({
 			evolution_log: z.string().default("phantom-config/meta/evolution-log.jsonl"),
 			golden_suite: z.string().default("phantom-config/meta/golden-suite.jsonl"),
 			session_log: z.string().default("phantom-config/memory/session-log.jsonl"),
+			/** Base directory for source code deltas (relative to project root). */
+			source_dir: z.string().default("src"),
+			/** Base directory for Claude Code skill files (relative to project root). */
+			skills_dir: z.string().default(".claude/skills"),
+		})
+		.default({}),
+	/** Opt-in capabilities that expand what the evolution engine can modify. */
+	capabilities: z
+		.object({
+			/** Allow the engine to modify phantom-config/ markdown files. Defaults true (existing behavior). */
+			allow_config_changes: z.boolean().default(true),
+			/** Allow the engine to modify files under source_dir. Requires typecheck to pass. */
+			allow_source_changes: z.boolean().default(false),
+			/** Allow the engine to create/modify Claude Code skill files under skills_dir. */
+			allow_skill_creation: z.boolean().default(false),
+			/** Allow the engine to register/unregister dynamic MCP tools via the tool registry. */
+			allow_tool_registration: z.boolean().default(false),
 		})
 		.default({}),
 });

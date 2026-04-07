@@ -7,6 +7,7 @@ import type { MemoryContextBuilder } from "../memory/context-builder.ts";
 import type { RoleTemplate } from "../roles/types.ts";
 import { CostTracker } from "./cost-tracker.ts";
 import { type AgentCost, type AgentResponse, emptyCost } from "./events.ts";
+import { TraceWriter } from "./trace-writer.ts";
 import { formatEnvSnapshot, gatherEnvSnapshot } from "./env-snapshot.ts";
 import { createDangerousCommandBlocker, createFileTracker } from "./hooks.ts";
 import { assemblePrompt } from "./prompt-assembler.ts";
@@ -118,6 +119,7 @@ export class AgentRuntime {
 
 		const fileTracker = createFileTracker();
 		const commandBlocker = createDangerousCommandBlocker();
+		const traceWriter = new TraceWriter(sessionKey);
 		let memoryContext: string | undefined;
 		if (this.memoryContextBuilder) {
 			try {
@@ -209,6 +211,7 @@ export class AgentRuntime {
 									tool: toolBlock.name,
 									input: toolBlock.input,
 								});
+								traceWriter.logToolUse(toolBlock.name, toolBlock.input ?? {});
 							}
 						}
 						break;
@@ -271,6 +274,7 @@ export class AgentRuntime {
 			sessionId: sdkSessionId,
 			cost,
 			durationMs: Date.now() - startTime,
+			traceFile: traceWriter.getPath(),
 		};
 	}
 }

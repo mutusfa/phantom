@@ -7,6 +7,17 @@ const SCRIPT_TIMEOUT_MS = 60_000;
 // Prevent runaway output from filling memory (100KB is generous for tool responses).
 const MAX_OUTPUT_BYTES = 100_000;
 
+// Interpreter selection by file extension.
+function interpreterFor(path: string): string {
+	const ext = path.split(".").pop()?.toLowerCase();
+	return ext === "py" ? "python3" : "bun --env-file= run";
+}
+
+// Shell-safe single-quote escaping for file paths.
+function shellQuote(s: string): string {
+	return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
 /**
  * Safe environment for subprocess execution.
  * Only expose what dynamic tools legitimately need.
@@ -61,47 +72,99 @@ async function executeScriptHandler(path: string, input: Record<string, unknown>
 		};
 	}
 
-	// --env-file= prevents bun from auto-loading .env/.env.local files,
-	// which would leak secrets into the subprocess despite buildSafeEnv.
-	const proc = Bun.spawn(["bun", "--env-file=", "run", path], {
-		stdin: "pipe",
+	// Wrap the script in a subshell so early exit doesn't prevent marker printing.
+	// Input arrives via TOOL_INPUT env var (set by buildSafeEnv) - no stdin needed.
+	// For bun scripts, --env-file= prevents auto-loading .env/.env.local secrets.
+	const markerId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+	const marker = `PHANTOM_DONE_${markerId}`;
+	const runCmd = `${interpreterFor(path)} ${shellQuote(path)}`;
+	const wrappedCommand = `(\n${runCmd}\n)\n_pe=$?\nprintf '%s %d\\n' '${marker}' $_pe`;
+
+	const proc = Bun.spawn(["bash", "-c", wrappedCommand], {
 		stdout: "pipe",
 		stderr: "pipe",
 		env: buildSafeEnv(input),
 	});
 
-	proc.stdin.write(JSON.stringify(input));
-	proc.stdin.end();
-
 	const killTimeout = setTimeout(() => proc.kill(), SCRIPT_TIMEOUT_MS);
 
+	let totalBytes = 0;
+	let markerFound = false;
+	let markerExitCode = 0;
+	const stdoutParts: string[] = [];
+	const decoder = new TextDecoder();
+	let tailBuffer = "";
+
 	try {
-		// Read stdout and stderr in parallel to avoid pipe-buffer deadlock on large output.
-		const [stdout, stderr] = await Promise.all([
-			new Response(proc.stdout).text(),
-			new Response(proc.stderr).text(),
-		]);
-		const exitCode = await proc.exited;
+		for await (const chunk of proc.stdout) {
+			const text = decoder.decode(chunk, { stream: true });
+			stdoutParts.push(text);
+			totalBytes += chunk.byteLength;
 
-		if (exitCode !== 0) {
-			const isTimeout = exitCode === null || exitCode === 143;
-			return {
-				content: [
-					{
-						type: "text",
-						text: isTimeout
-							? `Script timed out after ${SCRIPT_TIMEOUT_MS / 1000}s`
-							: `Script error (exit ${exitCode}): ${stderr || stdout}`,
-					},
-				],
-				isError: true,
-			};
+			tailBuffer += text;
+			const markerIdx = tailBuffer.indexOf(marker);
+			if (markerIdx >= 0) {
+				markerFound = true;
+				const afterMarker = tailBuffer.slice(markerIdx + marker.length).trim();
+				const exitMatch = afterMarker.match(/^(\d+)/);
+				markerExitCode = exitMatch?.[1] ? parseInt(exitMatch[1], 10) : 0;
+				break;
+			}
+			if (tailBuffer.length > marker.length * 4) {
+				tailBuffer = tailBuffer.slice(-(marker.length * 2));
+			}
+
+			if (totalBytes > MAX_OUTPUT_BYTES) {
+				proc.kill();
+				await proc.exited;
+				return {
+					content: [{ type: "text", text: `Output size limit exceeded (${MAX_OUTPUT_BYTES} bytes)` }],
+					isError: true,
+				};
+			}
 		}
-
-		return { content: [{ type: "text", text: stdout.trim() }] };
 	} finally {
 		clearTimeout(killTimeout);
 	}
+
+	const exitCode = await proc.exited;
+
+	if (!markerFound) {
+		const stderr = await new Response(proc.stderr).text().catch(() => "");
+		const isTimeout = exitCode === null || exitCode === 143;
+		return {
+			content: [
+				{
+					type: "text",
+					text: isTimeout
+						? `Script timed out after ${SCRIPT_TIMEOUT_MS / 1000}s`
+						: `Script error (exit ${exitCode ?? "unknown"}): ${stderr || stdoutParts.join("").trim()}`,
+				},
+			],
+			isError: true,
+		};
+	}
+
+	if (markerExitCode !== 0) {
+		const stderr = await new Response(proc.stderr).text().catch(() => "");
+		return {
+			content: [
+				{
+					type: "text",
+					text: `Script error (exit ${markerExitCode}): ${stderr || stdoutParts.join("").trim()}`,
+				},
+			],
+			isError: true,
+		};
+	}
+
+	let stdout = stdoutParts.join("");
+	const markerPos = stdout.indexOf(marker);
+	if (markerPos >= 0) {
+		stdout = stdout.slice(0, markerPos);
+	}
+
+	return { content: [{ type: "text", text: stdout.trim() }] };
 }
 
 async function executeShellHandler(command: string, input: Record<string, unknown>): Promise<CallToolResult> {
