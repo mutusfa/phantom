@@ -67,6 +67,7 @@ import { createRoleRegistry } from "./roles/registry.ts";
 import type { RoleTemplate } from "./roles/types.ts";
 import { Scheduler } from "./scheduler/service.ts";
 import { createSchedulerToolServer } from "./scheduler/tool.ts";
+import { detectInterventions } from "./eval/intervention-detector.ts";
 import { getSecretRequest } from "./secrets/store.ts";
 import { createSecretToolServer } from "./secrets/tools.ts";
 import { reportAgentReady } from "./tenancy/heartbeat.ts";
@@ -205,6 +206,17 @@ async function main(): Promise<void> {
 	// Wire feedback to evolution engine
 	setFeedbackHandler((signal) => {
 		console.log(`[feedback] ${signal.type} from ${signal.source} (${signal.conversationId})`);
+
+		// Persist the reaction so the behavior eval script can query it later
+		try {
+			db.run(
+				`INSERT INTO session_feedback (session_key, type, source) VALUES (?, ?, ?)`,
+				[signal.conversationId, signal.type, signal.source],
+			);
+		} catch (err: unknown) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			console.warn(`[feedback] Failed to persist feedback: ${errMsg}`);
+		}
 		// Feedback signals feed into the next session's evolution context
 		if (evolution) {
 			const sessionSummary: SessionSummary = {
@@ -258,6 +270,15 @@ async function main(): Promise<void> {
 
 		// Wire dynamic tool management tools into the agent as in-process MCP tools
 		const registry = mcpServer.getDynamicToolRegistry();
+
+		// Give the evolution engine access to the tool registry so it can register/unregister
+		// dynamic MCP tools as an evolution outcome (when allow_tool_registration is enabled).
+		if (evolution) {
+			evolution.setToolRegistry({
+				register: (params) => { registry.register({ ...params, input_schema: params.input_schema ?? {} }); },
+				unregister: (name) => registry.unregister(name),
+			});
+		}
 
 		// Wire scheduler into the agent (Slack channel set later after channel init)
 		scheduler = new Scheduler({ db, runtime });
@@ -719,7 +740,11 @@ async function main(): Promise<void> {
 			const tts = slackThreadTs;
 			progressStream = createProgressStream({
 				adapter: {
-					postMessage: (_t) => sc.postThinking(ch, tts).then((ts) => ts ?? ""),
+					postMessage: (_t) =>
+						sc.postThinking(ch, tts).then((ts) => {
+							if (!ts) throw new Error("postThinking returned null");
+							return ts;
+						}),
 					updateMessage: (msgId, updatedText) => sc.updateMessage(ch, msgId, updatedText),
 				},
 				onFinish: async (messageId, text) => {
@@ -777,11 +802,13 @@ async function main(): Promise<void> {
 		}
 
 		// Deliver the response
-		if (progressStream) {
+		if (progressStream && progressStream.getMessageId()) {
 			// Slack: update the progress message with the final response + feedback buttons
 			await progressStream.finish(response.text);
 		} else if (isSlack && slackChannel && slackChannelId && slackThreadTs) {
-			// Slack fallback: send direct reply with feedback
+			// Slack fallback: postThinking failed during start(), or no progress stream.
+			// Stop the progress stream cleanly (clears timers) then post a fresh reply.
+			if (progressStream) await progressStream.finish("");
 			const thinkingTs = await slackChannel.postThinking(slackChannelId, slackThreadTs);
 			if (thinkingTs) {
 				await slackChannel.updateWithFeedback(slackChannelId, thinkingTs, response.text);
@@ -811,6 +838,21 @@ async function main(): Promise<void> {
 		}
 
 		const trackedFiles = runtime.getLastTrackedFiles();
+
+		// Heuristic intervention detection - store counts for the behavior eval
+		try {
+			const { corrections, confirmations } = detectInterventions(existing.user, existing.assistant);
+			if (corrections > 0 || confirmations > 0) {
+				db.run(
+					`UPDATE sessions SET correction_count = correction_count + ?, confirmation_count = confirmation_count + ?
+					 WHERE session_key = ?`,
+					[corrections, confirmations, convKey],
+				);
+			}
+		} catch (err: unknown) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			console.warn(`[eval] Intervention detection failed: ${errMsg}`);
+		}
 
 		// Memory consolidation (non-blocking)
 		if (memory.isReady()) {
@@ -863,6 +905,7 @@ async function main(): Promise<void> {
 				cost_usd: response.cost.totalUsd,
 				started_at: sessionStartedAt,
 				ended_at: new Date().toISOString(),
+				trace_file: response.traceFile,
 			};
 
 			evolution

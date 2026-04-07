@@ -16,6 +16,7 @@ export type VersionChange = {
 	summary: string;
 	rationale: string;
 	session_ids: string[];
+	domain?: DeltaDomain;
 };
 
 export type EvolutionVersion = {
@@ -58,6 +59,8 @@ export type SessionSummary = {
 	cost_usd: number;
 	started_at: string;
 	ended_at: string;
+	/** Path to the JSONL trace file for this session (tool calls + inputs) */
+	trace_file?: string;
 };
 
 export type EvolutionResult = {

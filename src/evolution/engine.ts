@@ -42,6 +42,7 @@ export class EvolutionEngine {
 	private config: EvolutionConfig;
 	private reflectionEnabled: boolean;
 	private runtime: AgentRuntime | null;
+	private toolRegistry?: ToolRegistryAdapter;
 
 	// Phase 0 belt-and-suspenders mutex. The Phase 2 cadence serialises
 	// drains through its own `inFlight` guard so this is redundant on the
@@ -328,7 +329,6 @@ export class EvolutionEngine {
 			console.warn(`[evolution] drain ${result.drainId} ${result.status}: ${result.error}`);
 		}
 	}
-
 	getConfig(): EvolvedConfig {
 		const dir = this.config.paths.config_dir;
 		const version = readVersion(this.config);

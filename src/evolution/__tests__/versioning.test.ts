@@ -26,7 +26,10 @@ function testConfig(): EvolutionConfig {
 			metrics_file: `${TEST_DIR}/meta/metrics.json`,
 			evolution_log: `${TEST_DIR}/meta/evolution-log.jsonl`,
 			session_log: `${TEST_DIR}/memory/session-log.jsonl`,
+			source_dir: `${TEST_DIR}/src`,
+			skills_dir: `${TEST_DIR}/.claude/skills`,
 		},
+		capabilities: { allow_config_changes: true, allow_source_changes: false, allow_skill_creation: false, allow_tool_registration: false },
 	};
 }
 

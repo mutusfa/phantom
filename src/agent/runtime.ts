@@ -10,6 +10,7 @@ import type { RoleTemplate } from "../roles/types.ts";
 import { executeChatQuery } from "./chat-query.ts";
 import { CostTracker } from "./cost-tracker.ts";
 import { type AgentCost, type AgentResponse, emptyCost } from "./events.ts";
+import { TraceWriter } from "./trace-writer.ts";
 import { formatEnvSnapshot, gatherEnvSnapshot } from "./env-snapshot.ts";
 import { createDangerousCommandBlocker, createFileTracker } from "./hooks.ts";
 import { emitPluginInitSnapshot } from "./init-plugin-snapshot.ts";
@@ -180,6 +181,7 @@ export class AgentRuntime {
 
 		const fileTracker = createFileTracker();
 		const commandBlocker = createDangerousCommandBlocker();
+		const traceWriter = new TraceWriter(sessionKey);
 		let memoryContext: string | undefined;
 		if (this.memoryContextBuilder) {
 			try {
@@ -274,9 +276,13 @@ export class AgentRuntime {
 						}
 						for (const block of message.message.content) {
 							if (block.type === "tool_use") {
-								const tb = block as { name: string; input?: Record<string, unknown> };
-								onEvent?.({ type: "tool_use", tool: tb.name, input: tb.input });
-							}
+								const toolBlock = block as { name: string; input?: Record<string, unknown> };
+								onEvent?.({
+									type: "tool_use",
+									tool: toolBlock.name,
+									input: toolBlock.input,
+								});
+								traceWriter.logToolUse(toolBlock.name, toolBlock.input ?? {});
 						}
 						break;
 					}
@@ -333,7 +339,14 @@ export class AgentRuntime {
 		this.lastTrackedFiles = fileTracker.getTrackedFiles();
 		this.costTracker.record(sessionKey, cost, queryModel);
 		this.sessionStore.touch(sessionKey);
-		return { text: resultText, sessionId: sdkSessionId, cost, durationMs: Date.now() - startTime };
+
+		return {
+			text: resultText,
+			sessionId: sdkSessionId,
+			cost,
+			durationMs: Date.now() - startTime,
+			traceFile: traceWriter.getPath(),
+		};
 	}
 }
 
