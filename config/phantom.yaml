@@ -1,5 +1,6 @@
 name: phantom
 port: 3100
+public_url: http://192.168.0.102:3100
 role: swe
 model: claude-sonnet-4-6
 effort: max

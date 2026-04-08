@@ -30,7 +30,7 @@ judges:
   # "auto" enables when ANTHROPIC_API_KEY is available
   # "always" enables unconditionally
   # "never" disables unconditionally
-  enabled: "auto"
+  enabled: "always"
   # Safety net against runaway costs (daily reset)
   cost_cap_usd_per_day: 50.0
   # Maximum golden suite entries (prune oldest when exceeded)
@@ -45,3 +45,18 @@ paths:
   evolution_log: "phantom-config/meta/evolution-log.jsonl"
   golden_suite: "phantom-config/meta/golden-suite.jsonl"
   session_log: "phantom-config/memory/session-log.jsonl"
+  source_dir: "src"
+  skills_dir: ".claude/skills"
+
+# Expanded evolution capabilities (opt-in, disabled by default)
+capabilities:
+  # Allow the engine to modify phantom-config/ markdown files (user-profile, domain-knowledge, etc.)
+  # Defaults true - set to false to freeze all config evolution.
+  allow_config_changes: true
+  # Allow the engine to modify TypeScript source files under src/
+  # Requires typecheck to pass before changes are applied.
+  allow_source_changes: false
+  # Allow the engine to create/modify Claude Code skill files under .claude/skills/
+  allow_skill_creation: true
+  # Allow the engine to register/unregister dynamic MCP tools via the tool registry
+  allow_tool_registration: false
