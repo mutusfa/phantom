@@ -226,18 +226,14 @@ def send_message(page, backend_urn: str, message: str) -> dict:
     editor.click()
     time.sleep(0.5)
 
+    # Type via real keyboard events so LinkedIn's React editor picks up the input.
+    # Shift+Enter inserts a line break; plain Enter would send the message.
     lines = message.split("\n")
-    page.evaluate(
-        """(lines) => {
-        const el = document.querySelector('.msg-form__contenteditable');
-        el.focus();
-        for (let i = 0; i < lines.length; i++) {
-            if (i > 0) document.execCommand('insertLineBreak');
-            if (lines[i]) document.execCommand('insertText', false, lines[i]);
-        }
-    }""",
-        lines,
-    )
+    for i, line in enumerate(lines):
+        if i > 0:
+            page.keyboard.press("Shift+Enter")
+        if line:
+            page.keyboard.type(line)
     time.sleep(1)
 
     send_btn = page.locator(".msg-form__send-button")
