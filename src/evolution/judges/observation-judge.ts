@@ -2,7 +2,7 @@ import type { EvolvedConfig, SessionObservation, SessionSummary } from "../types
 import { callJudge } from "./client.ts";
 import { observationExtractionPrompt } from "./prompts.ts";
 import { ObservationExtractionResult, type ObservationExtractionResultType } from "./schemas.ts";
-import { JUDGE_MODEL_SONNET, type JudgeResult } from "./types.ts";
+import { JUDGE_MODEL_HAIKU, type JudgeResult } from "./types.ts";
 
 /**
  * Use Sonnet to extract rich observations from a session transcript.
@@ -17,7 +17,7 @@ export async function extractObservationsWithJudge(
 	const { system, user } = observationExtractionPrompt(transcript, configText);
 
 	return callJudge({
-		model: JUDGE_MODEL_SONNET,
+		model: JUDGE_MODEL_HAIKU,
 		systemPrompt: system,
 		userMessage: user,
 		schema: ObservationExtractionResult,

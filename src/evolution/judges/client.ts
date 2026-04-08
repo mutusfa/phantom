@@ -1,5 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 // zod/v4 required: matches schemas.ts for zodOutputFormat compatibility
 import type { z } from "zod/v4";
 import {
@@ -12,11 +15,32 @@ import {
 
 let _client: Anthropic | null = null;
 
-function getClient(): Anthropic {
-	if (!_client) {
-		_client = new Anthropic();
+function readOAuthToken(): string | null {
+	try {
+		// PHANTOM_CREDENTIALS_PATH overrides the default for testing
+		const credPath = process.env.PHANTOM_CREDENTIALS_PATH ?? join(homedir(), ".claude", ".credentials.json");
+		const raw = readFileSync(credPath, "utf-8");
+		const creds = JSON.parse(raw) as { claudeAiOauth?: { accessToken?: string; expiresAt?: number } };
+		const oauth = creds?.claudeAiOauth;
+		if (!oauth?.accessToken) return null;
+		// expiresAt is a ms timestamp; require at least 60 seconds remaining
+		if (oauth.expiresAt && oauth.expiresAt < Date.now() + 60_000) return null;
+		return oauth.accessToken;
+	} catch {
+		return null;
 	}
-	return _client;
+}
+
+function getClient(): Anthropic {
+	if (_client) return _client; // injected (tests) or cached API key client
+	if (process.env.ANTHROPIC_API_KEY) {
+		_client = new Anthropic();
+		return _client;
+	}
+	// OAuth fallback: read fresh token each call so refreshes are picked up
+	const token = readOAuthToken();
+	if (!token) throw new Error("No Anthropic credentials (no ANTHROPIC_API_KEY and no valid OAuth token)");
+	return new Anthropic({ authToken: token });
 }
 
 // Visible for testing - allows injecting a mock client
@@ -25,7 +49,7 @@ export function setClient(client: Anthropic | null): void {
 }
 
 export function isJudgeAvailable(): boolean {
-	return !!process.env.ANTHROPIC_API_KEY;
+	return !!process.env.ANTHROPIC_API_KEY || readOAuthToken() !== null;
 }
 
 /**

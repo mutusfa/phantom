@@ -17,6 +17,7 @@ import {
 	updateAfterRollback,
 	updateAfterSession,
 } from "./metrics.ts";
+import { isJudgeAvailable } from "./judges/client.ts";
 import {
 	buildCritiqueFromObservations,
 	extractObservations,
@@ -50,7 +51,7 @@ export class EvolutionEngine {
 		const setting = this.config.judges?.enabled ?? "auto";
 		if (setting === "never") return false;
 		if (setting === "always") return true;
-		return !!process.env.ANTHROPIC_API_KEY;
+		return isJudgeAvailable();
 	}
 
 	usesLLMJudges(): boolean {

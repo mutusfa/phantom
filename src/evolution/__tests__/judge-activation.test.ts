@@ -79,10 +79,12 @@ function setupWithJudgeMode(enabled: "auto" | "always" | "never"): void {
 }
 
 let savedApiKey: string | undefined;
+let savedCredPath: string | undefined;
 
 describe("Judge Activation", () => {
 	beforeEach(() => {
 		savedApiKey = process.env.ANTHROPIC_API_KEY;
+		savedCredPath = process.env.PHANTOM_CREDENTIALS_PATH;
 	});
 
 	afterEach(() => {
@@ -90,6 +92,11 @@ describe("Judge Activation", () => {
 			process.env.ANTHROPIC_API_KEY = savedApiKey;
 		} else {
 			process.env.ANTHROPIC_API_KEY = undefined;
+		}
+		if (savedCredPath !== undefined) {
+			process.env.PHANTOM_CREDENTIALS_PATH = savedCredPath;
+		} else {
+			process.env.PHANTOM_CREDENTIALS_PATH = undefined;
 		}
 		rmSync(TEST_DIR, { recursive: true, force: true });
 	});
@@ -101,8 +108,9 @@ describe("Judge Activation", () => {
 		expect(engine.usesLLMJudges()).toBe(true);
 	});
 
-	test("auto mode disables judges when ANTHROPIC_API_KEY is missing", () => {
+	test("auto mode disables judges when no credentials are available", () => {
 		process.env.ANTHROPIC_API_KEY = undefined;
+		process.env.PHANTOM_CREDENTIALS_PATH = "/nonexistent/credentials.json";
 		setupWithJudgeMode("auto");
 		const engine = new EvolutionEngine(CONFIG_PATH);
 		expect(engine.usesLLMJudges()).toBe(false);
@@ -129,6 +137,7 @@ describe("Judge Activation", () => {
 		expect(engine.usesLLMJudges()).toBe(true);
 
 		process.env.ANTHROPIC_API_KEY = undefined;
+		process.env.PHANTOM_CREDENTIALS_PATH = "/nonexistent/credentials.json";
 		setupWithJudgeMode("auto");
 		const engine2 = new EvolutionEngine(CONFIG_PATH);
 		expect(engine2.usesLLMJudges()).toBe(false);
@@ -136,6 +145,7 @@ describe("Judge Activation", () => {
 
 	test("missing judges section defaults to auto mode", () => {
 		process.env.ANTHROPIC_API_KEY = undefined;
+		process.env.PHANTOM_CREDENTIALS_PATH = "/nonexistent/credentials.json";
 		mkdirSync(`${TEST_DIR}/config`, { recursive: true });
 		mkdirSync(`${TEST_DIR}/phantom-config/meta`, { recursive: true });
 		mkdirSync(`${TEST_DIR}/phantom-config/strategies`, { recursive: true });
