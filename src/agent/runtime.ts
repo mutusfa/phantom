@@ -127,6 +127,13 @@ export class AgentRuntime {
 		return runJudgeQuery(this.config, options);
 	}
 
+	// Returns true when an SDK session exists and can be resumed, meaning the SDK
+	// already has conversation history. False means it's a fresh start with no history.
+	hasResumableSession(channelId: string, conversationId: string): boolean {
+		const session = this.sessionStore.findActive(channelId, conversationId);
+		return session?.sdk_session_id != null;
+	}
+
 	async runForChat(
 		sessionKey: string,
 		message: MessageParam,
