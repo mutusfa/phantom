@@ -255,6 +255,40 @@ export class SlackChannel implements Channel {
 		}
 	}
 
+	// Fetches prior messages in a thread so a fresh session can see what came before.
+	// Excludes the current message (currentTs) to avoid duplicating it in context.
+	async fetchThreadHistory(channel: string, threadTs: string, currentTs: string): Promise<string> {
+		try {
+			const result = await this.app.client.conversations.replies({
+				channel,
+				ts: threadTs,
+				limit: 20,
+			});
+			const messages = (result.messages ?? []) as Array<{
+				bot_id?: string;
+				user?: string;
+				text?: string;
+				ts?: string;
+			}>;
+
+			const prior = messages.filter((m) => m.ts !== currentTs && m.text?.trim());
+			if (prior.length === 0) return "";
+
+			const lines = prior.map((m) => {
+				const isBot = m.bot_id != null || m.user === this.botUserId;
+				const speaker = isBot ? "Phantom" : "User";
+				const text = (m.text ?? "").slice(0, 800);
+				return `${speaker}: ${text}`;
+			});
+
+			return `[Prior messages in this thread]\n${lines.join("\n")}\n`;
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			console.warn(`[slack] Failed to fetch thread history: ${msg}`);
+			return "";
+		}
+	}
+
 	async postThinking(channel: string, threadTs: string): Promise<string | null> {
 		try {
 			const result = await this.app.client.chat.postMessage({

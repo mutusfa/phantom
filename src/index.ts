@@ -517,7 +517,27 @@ async function main(): Promise<void> {
 			telegramChannel.startTyping(telegramChatId);
 		}
 
-		const response = await runtime.handleMessage(msg.channelId, msg.conversationId, msg.text, (event: RuntimeEvent) => {
+		// For Slack replies where no resumable SDK session exists (e.g. phantom sent a
+		// proactive message via the scheduler but never created a session), fetch the
+		// thread history from Slack and prepend it so the agent has context about what
+		// was said before the user replied.
+		let messageText = msg.text;
+		if (
+			isSlack &&
+			slackChannel &&
+			slackChannelId &&
+			slackThreadTs &&
+			slackMessageTs &&
+			slackThreadTs !== slackMessageTs &&
+			!runtime.hasResumableSession(msg.channelId, msg.conversationId)
+		) {
+			const history = await slackChannel.fetchThreadHistory(slackChannelId, slackThreadTs, slackMessageTs);
+			if (history) {
+				messageText = `${history}\n${msg.text}`;
+			}
+		}
+
+		const response = await runtime.handleMessage(msg.channelId, msg.conversationId, messageText, (event: RuntimeEvent) => {
 			switch (event.type) {
 				case "init":
 					console.log(`\n[phantom] Session: ${event.sessionId}`);
