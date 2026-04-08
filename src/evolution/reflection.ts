@@ -12,9 +12,10 @@ import type { ConfigDelta, CritiqueResult, EvolvedConfig, SessionObservation, Se
 export async function extractObservationsWithLLM(
 	session: SessionSummary,
 	currentConfig: EvolvedConfig,
+	reflectionModel: string,
 ): Promise<{ observations: SessionObservation[]; judgeCost: JudgeCostEntry | null }> {
 	try {
-		const result = await extractObservationsWithJudge(session, currentConfig);
+		const result = await extractObservationsWithJudge(session, currentConfig, reflectionModel);
 		const observations = toSessionObservations(result.data);
 		return {
 			observations: observations.length > 0 ? observations : extractObservations(session),

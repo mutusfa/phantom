@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
+import { JUDGE_MODEL_SONNET } from "./judges/types.ts";
 
 export const EvolutionConfigSchema = z.object({
 	cadence: z
@@ -21,7 +22,7 @@ export const EvolutionConfigSchema = z.object({
 		.default({}),
 	reflection: z
 		.object({
-			model: z.string().default("claude-sonnet-4-20250514"),
+			model: z.string().default(JUDGE_MODEL_SONNET),
 			effort: z.enum(["low", "medium", "high", "max"]).default("high"),
 			max_budget_usd: z.number().positive().default(0.5),
 		})

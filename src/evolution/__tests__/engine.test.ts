@@ -26,7 +26,7 @@ function setupTestEnvironment(): void {
 			"  auto_rollback_threshold: 0.1",
 			"  auto_rollback_window: 5",
 			"reflection:",
-			'  model: "claude-sonnet-4-20250514"',
+			'  model: "claude-sonnet-4-6"',
 			"judges:",
 			'  enabled: "never"',
 			"paths:",

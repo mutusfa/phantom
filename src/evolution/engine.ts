@@ -100,7 +100,7 @@ export class EvolutionEngine {
 		let observations: import("./types.ts").SessionObservation[];
 		if (this.llmJudgesEnabled && !this.isDailyCostCapReached()) {
 			const currentConfig = this.getConfig();
-			const result = await extractObservationsWithLLM(session, currentConfig);
+			const result = await extractObservationsWithLLM(session, currentConfig, this.config.reflection.model);
 			observations = result.observations;
 			if (result.judgeCost) {
 				addCost(judgeCosts.observation_extraction, result.judgeCost);
