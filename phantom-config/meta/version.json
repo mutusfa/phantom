@@ -1,25 +1,18 @@
 {
-  "version": 7,
-  "parent": 6,
-  "timestamp": "2026-04-03T00:00:00.000Z",
+  "version": 10,
+  "parent": 9,
+  "timestamp": "2026-04-06T03:23:34.000Z",
   "changes": [
     {
-      "file": "domain-knowledge.md",
-      "type": "populate",
-      "content": "Added codebase facts, ADO/LinkedIn integrations, and collaborative project notes.",
-      "rationale": "domain-knowledge.md was empty; nightly consolidation from 11 sessions on 2026-04-02.",
-      "session_ids": []
-    },
-    {
-      "file": "strategies/task-patterns.md",
-      "type": "populate",
-      "content": "Added collaborative repo PR pattern and cache-aware cost reporting pattern.",
-      "rationale": "Patterns confirmed across multiple sessions on 2026-04-02.",
+      "file": "user-profile.md",
+      "type": "update",
+      "content": "Corrected title to Senior Data Scientist. Added career context (DS since 2017, structured data focus) and cloud experience (Azure primary, GCP/AWS minimal).",
+      "rationale": "user_julius_profile.md was enriched with career timeline and cloud experience since v9; title was also corrected from Data Scientist to Senior Data Scientist.",
       "session_ids": []
     }
   ],
   "metrics_at_change": {
-    "session_count": 43,
+    "session_count": 82,
     "success_rate_7d": 1,
     "correction_rate_7d": 0.05
   }
