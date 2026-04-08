@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
+import { JUDGE_MODEL_SONNET } from "./judges/types.ts";
 
 // Phase 3 evolution config schema.
 //
