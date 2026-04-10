@@ -301,7 +301,7 @@ function buildEvolvedSections(evolved: EvolvedConfig): string {
 }
 
 function buildMemorySection(memoryContext: string): string {
-	return `# Your Memory\n\nPersistent memory from previous sessions. Use this to maintain continuity.\n\n${memoryContext}`;
+	return `# Your Memory\n\nCompleted episodes and facts from previous sessions. These are HISTORICAL records - do NOT treat them as unresolved tasks or current context. The user's current message defines the task. Use these only as background reference.\n\n${memoryContext}`;
 }
 
 function buildFallbackRoleHint(config: PhantomConfig): string {
