@@ -84,6 +84,16 @@ async function main(): Promise<void> {
 	const ext = manifest.candidate_file.split(".").pop() ?? "ts";
 	const candidatesDir = join(taskDir, "candidates");
 
+	// Project-level autonomous context: instructions specific to Phantom sessions,
+	// separate from CLAUDE.md which is injected in all Claude Code sessions.
+	const projectContextPath = join(process.cwd(), "data", "harness-runs", project, "context.md");
+	const projectContext = existsSync(projectContextPath)
+		? readFileSync(projectContextPath, "utf-8")
+		: null;
+	if (projectContext) {
+		console.log(`[harness] Loaded project context (${projectContextPath})`);
+	}
+
 	if (!existsSync(candidatePath)) {
 		console.error(`Candidate file not found: ${candidatePath}`);
 		process.exit(1);
@@ -135,7 +145,7 @@ async function main(): Promise<void> {
 		console.log(`[harness] Proposing ${vStr} (best=${best.version} score=${best.score.toFixed(3)})...`);
 
 		const proposerPrompt = buildProposerPrompt(manifest, taskDir, candidatesDir, best, ext);
-		const candidate = await runProposer(proposerPrompt);
+		const candidate = await runProposer(proposerPrompt, manifest.working_dir, projectContext);
 
 		if (!candidate.trim()) {
 			console.error(`[harness] Proposer returned empty response, stopping`);
@@ -237,8 +247,16 @@ Before proposing any change:
 **Output only the complete improved file content. No markdown fences, no explanation.**`;
 }
 
-async function runProposer(prompt: string): Promise<string> {
+async function runProposer(prompt: string, workingDir: string, projectContext: string | null): Promise<string> {
 	let result = "";
+
+	const baseInstruction =
+		"You are a code optimization proposer in a harness loop. " +
+		"Read the execution trace, diagnose the failure, then output only the improved file content. " +
+		"No markdown, no explanation - just the raw file.";
+	const systemAppend = projectContext
+		? `${baseInstruction}\n\n# Project Context\n\n${projectContext}`
+		: baseInstruction;
 
 	const queryStream = query({
 		prompt,
@@ -246,14 +264,11 @@ async function runProposer(prompt: string): Promise<string> {
 			model: "claude-opus-4-6",
 			permissionMode: "bypassPermissions",
 			allowDangerouslySkipPermissions: true,
-			settingSources: ["project"],
+			cwd: workingDir,
 			systemPrompt: {
 				type: "preset" as const,
 				preset: "claude_code" as const,
-				append:
-					"You are a code optimization proposer in a harness loop. " +
-					"Read the execution trace, diagnose the failure, then output only the improved file content. " +
-					"No markdown, no explanation - just the raw file.",
+				append: systemAppend,
 			},
 		},
 	});
