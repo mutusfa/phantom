@@ -13,4 +13,6 @@ local/
 bun.lockb
 HANDOFFS.md
 plans/
-phantom-config/
+phantom-config/*
+!phantom-config/constitution.md
+!phantom-config/persona.md
