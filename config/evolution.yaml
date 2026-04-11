@@ -21,7 +21,7 @@ gates:
 
 # Reflection agent settings
 reflection:
-  model: "claude-sonnet-4-20250514"
+  model: "claude-sonnet-4-6"
   effort: "high"
   max_budget_usd: 0.50
 
