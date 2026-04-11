@@ -9,8 +9,12 @@ Subsequent runs reuse the saved session without re-logging in.
 Usage:
   python3 linkedin_playwright.py conversations [limit]
   python3 linkedin_playwright.py messages <backend_urn> [limit]
-  python3 linkedin_playwright.py links <backend_urn>     # extract external URLs from thread
-  python3 linkedin_playwright.py login                   # force a fresh login
+  python3 linkedin_playwright.py links <backend_urn>          # extract external URLs from thread
+  python3 linkedin_playwright.py invitations [limit]          # pending connection requests
+  python3 linkedin_playwright.py accept <id> <shared_secret>  # accept a connection request
+  python3 linkedin_playwright.py accept_and_reply <id> <shared_secret> <name> <message>
+  python3 linkedin_playwright.py send <backend_urn> <message>
+  python3 linkedin_playwright.py login                        # force a fresh login
 """
 
 import sys
@@ -90,6 +94,30 @@ def voyager_fetch(page, path: str) -> dict:
     if result["status"] != 200:
         raise RuntimeError(f"API {path} returned {result['status']}: {result['body'][:200]}")
     return json.loads(result["body"])
+
+
+def voyager_post(page, path: str, body: dict) -> dict:
+    """Make an authenticated Voyager API POST from within the browser context."""
+    result = page.evaluate(f"""async () => {{
+        const csrf = document.cookie.match(/JSESSIONID="?([^";]+)/)?.[1] || '';
+        const res = await fetch({json.dumps(path)}, {{
+            method: 'POST',
+            headers: {{
+                'accept': 'application/vnd.linkedin.normalized+json+2.1',
+                'content-type': 'application/json',
+                'x-li-lang': 'en_US',
+                'x-restli-protocol-version': '2.0.0',
+                'csrf-token': csrf,
+            }},
+            credentials: 'include',
+            body: JSON.stringify({json.dumps(body)}),
+        }});
+        return {{ status: res.status, body: await res.text() }};
+    }}""")
+    if result["status"] not in (200, 201, 204):
+        raise RuntimeError(f"API POST {path} returned {result['status']}: {result['body'][:200]}")
+    body_text = result.get("body", "")
+    return json.loads(body_text) if body_text and body_text.strip() else {}
 
 
 def get_profile_urn(page) -> str:
@@ -211,6 +239,77 @@ def get_links(page, backend_urn: str) -> list[dict]:
     return links
 
 
+def get_invitations(page, limit: int = 20) -> list[dict]:
+    """Fetch pending connection requests."""
+    data = voyager_fetch(
+        page,
+        f"/voyager/api/relationships/invitationViews?invitationType=CONNECTION&start=0&count={limit}",
+    )
+    included = data.get("included", [])
+
+    # Build mini-profile lookup by URN
+    profiles: dict[str, dict] = {}
+    for item in included:
+        if "firstName" in item or "lastName" in item:
+            urn = item.get("entityUrn", "")
+            headline = item.get("headline", "")
+            if isinstance(headline, dict):
+                headline = headline.get("text", "")
+            profiles[urn] = {
+                "name": f"{item.get('firstName', '')} {item.get('lastName', '')}".strip(),
+                "occupation": item.get("occupation", ""),
+                "headline": headline,
+            }
+
+    invitations = []
+    for item in included:
+        if item.get("$type") != "com.linkedin.voyager.relationships.invitation.Invitation":
+            continue
+        invitation_id = item.get("entityUrn", "").split(":")[-1]
+        shared_secret = item.get("sharedSecret", "")
+        message = item.get("message", "") or item.get("customMessage", "") or ""
+        sent_time = item.get("sentTime", 0)
+
+        # Inviter profile URN is under *fromMember or fromMember
+        inviter_urn = item.get("*fromMember") or item.get("fromMember", "")
+        inviter = profiles.get(inviter_urn, {})
+
+        invitations.append({
+            "invitation_id": invitation_id,
+            "shared_secret": shared_secret,
+            "name": inviter.get("name", "Unknown"),
+            "occupation": inviter.get("occupation", ""),
+            "headline": inviter.get("headline", ""),
+            "message": message[:300],
+            "sent_time": sent_time,
+        })
+        if len(invitations) >= limit:
+            break
+
+    return invitations
+
+
+def accept_invitation(page, invitation_id: str, shared_secret: str) -> dict:
+    """Accept a pending connection request via Voyager API."""
+    path = f"/voyager/api/relationships/invitations/{invitation_id}?action=accept"
+    voyager_post(page, path, {"invitationType": "CONNECTION", "sharedSecret": shared_secret})
+    return {"ok": True}
+
+
+def find_conversation_with(page, profile_urn: str, name: str, wait_secs: int = 8) -> str | None:
+    """After accepting an invite, find the resulting conversation backend URN."""
+    time.sleep(wait_secs)
+    # Reload messaging page so the new conversation appears
+    page.goto(f"{LINKEDIN_BASE}/messaging/", wait_until="domcontentloaded", timeout=30000)
+    time.sleep(4)
+    conversations = get_conversations(page, profile_urn, limit=15, days=1)
+    for c in conversations:
+        for p in c.get("participants", []):
+            if name.lower() in p.lower():
+                return c.get("backend_urn")
+    return None
+
+
 def send_message(page, backend_urn: str, message: str) -> dict:
     """Send a message to an existing conversation thread."""
     thread_id = backend_urn.split(":")[-1]
@@ -327,6 +426,42 @@ def run_with_session(command: str, args: list[str]) -> dict:
                 result = send_message(page, backend_urn, message)
                 save_session(context)
                 return result
+
+            elif command == "invitations":
+                limit = int(args[0]) if args else 20
+                result = get_invitations(page, limit)
+                save_session(context)
+                return {"invitations": result}
+
+            elif command == "accept":
+                if len(args) < 2:
+                    return {"error": "usage: accept <invitation_id> <shared_secret>"}
+                result = accept_invitation(page, args[0], args[1])
+                save_session(context)
+                return result
+
+            elif command == "accept_and_reply":
+                # usage: accept_and_reply <invitation_id> <shared_secret> <name> <message>
+                if len(args) < 4:
+                    return {"error": "usage: accept_and_reply <invitation_id> <shared_secret> <name> <message>"}
+                invitation_id, shared_secret, name, reply = args[0], args[1], args[2], args[3]
+
+                accept_result = accept_invitation(page, invitation_id, shared_secret)
+                if not accept_result.get("ok"):
+                    return {"error": "Failed to accept invitation", "details": accept_result}
+
+                backend_urn = find_conversation_with(page, profile_urn, name)
+                if not backend_urn:
+                    save_session(context)
+                    return {
+                        "ok": True,
+                        "accepted": True,
+                        "warn": f"Accepted but could not find conversation with {name} - reply manually",
+                    }
+
+                send_result = send_message(page, backend_urn, reply)
+                save_session(context)
+                return {"ok": True, "accepted": True, "replied": send_result}
 
             else:
                 return {"error": f"unknown command: {command}"}
