@@ -21,6 +21,7 @@ export function assemblePrompt(
 	onboardingPrompt?: string,
 	dataDir?: string,
 	envSnapshot?: string,
+	projectContext?: string,
 	chatRuntimeContext?: string,
 ): string {
 	const sections: string[] = [];
@@ -89,6 +90,11 @@ export function assemblePrompt(
 	// tool when it needs them, which avoids a feedback loop that would re-
 	// present the agent's own past entries as canonical context on every query.
 	sections.push(buildAgentMemoryInstructions());
+
+	// 6.5. Active project context (loaded from the project's context file)
+	if (projectContext) {
+		sections.push(`# Active Project\n\n${projectContext}`);
+	}
 
 	// 7. Instructions - how you work
 	sections.push(buildInstructions());

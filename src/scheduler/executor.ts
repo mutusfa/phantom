@@ -1,11 +1,21 @@
 import type { Database } from "bun:sqlite";
-import type { AgentRuntime } from "../agent/runtime.ts";
+import type { AgentResponse } from "../agent/events.ts";
+import type { AgentRuntime, RuntimeEvent } from "../agent/runtime.ts";
 import type { SlackTransport } from "../channels/slack-transport.ts";
+import type { ProjectBindingInput } from "../projects/resolve-for-query.ts";
 import { type DeliveryOutcome, deliverResult } from "./delivery.ts";
 import { computeBackoffNextRun, computeNextRunAt } from "./schedule.ts";
 import { JOB_STATUS_VALUES, type ScheduledJob } from "./types.ts";
 
 export const MAX_CONSECUTIVE_ERRORS = 10;
+
+type RunWithProjectBinding = (
+	channelId: string,
+	conversationId: string,
+	text: string,
+	onEvent?: (event: RuntimeEvent) => void,
+	explicit?: ProjectBindingInput,
+) => Promise<AgentResponse>;
 
 export type ExecutorContext = {
 	db: Database;
@@ -13,6 +23,7 @@ export type ExecutorContext = {
 	slackChannel: SlackTransport | undefined;
 	ownerUserId: string | null;
 	notifyOwner: (text: string) => void;
+	runWithProjectBinding?: RunWithProjectBinding;
 };
 
 /**
@@ -40,7 +51,9 @@ export async function executeJob(job: ScheduledJob, ctx: ExecutorContext): Promi
 	let errorMsg: string | null = null;
 
 	try {
-		const response = await ctx.runtime.handleMessage("scheduler", `sched:${job.id}`, job.task);
+		const binding = job.projectName ? { projectName: job.projectName } : undefined;
+		const run = ctx.runWithProjectBinding ?? ((ch, conv, t) => ctx.runtime.handleMessage(ch, conv, t));
+		const response = await run("scheduler", `sched:${job.id}`, job.task, undefined, binding);
 		responseText = response.text;
 		if (responseText.startsWith("Error:")) {
 			runStatus = "error";

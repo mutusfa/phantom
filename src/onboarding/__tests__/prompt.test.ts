@@ -59,6 +59,8 @@ describe("buildOnboardingPrompt", () => {
 		const prompt = buildOnboardingPrompt(mockRole, "Scout");
 		expect(prompt).toContain("phantom-config/user-profile.md");
 		expect(prompt).toContain("phantom-config/domain-knowledge.md");
+		expect(prompt).toContain("phantom_project");
+		expect(prompt).toContain("data/projects/");
 	});
 
 	test("tells agent to have natural conversation", () => {
@@ -80,6 +82,7 @@ describe("buildOnboardingPrompt", () => {
 		const prompt = buildOnboardingPrompt(mockRole, "Scout");
 		expect(prompt).toContain("phantom-config/user-profile.md");
 		expect(prompt).toContain("phantom-config/domain-knowledge.md");
+		expect(prompt).toContain("phantom_project");
 	});
 
 	test("different name produces different prompt", () => {

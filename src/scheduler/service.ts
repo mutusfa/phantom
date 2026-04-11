@@ -21,16 +21,26 @@ import type { JobCreateInput, JobRow, ScheduledJob } from "./types.ts";
 // one indexed SQL MIN query per hour, which is effectively free.
 const MAX_TIMER_MS = 60 * 60 * 1000;
 
+type RunWithProjectBinding = (
+	channelId: string,
+	conversationId: string,
+	text: string,
+	onEvent?: (event: import("../agent/runtime.ts").RuntimeEvent) => void,
+	explicit?: import("../projects/resolve-for-query.ts").ProjectBindingInput,
+) => Promise<import("../agent/events.ts").AgentResponse>;
+
 type SchedulerDeps = {
 	db: Database;
 	runtime: AgentRuntime;
 	slackChannel?: SlackTransport;
 	ownerUserId?: string | null;
+	runWithProjectBinding?: RunWithProjectBinding;
 };
 
 export class Scheduler {
 	private db: Database;
 	private runtime: AgentRuntime;
+	private runWithProjectBinding?: RunWithProjectBinding;
 	private slackChannel: SlackTransport | undefined;
 	private ownerUserId: string | null;
 	private timer: ReturnType<typeof setTimeout> | null = null;
@@ -41,6 +51,7 @@ export class Scheduler {
 	constructor(deps: SchedulerDeps) {
 		this.db = deps.db;
 		this.runtime = deps.runtime;
+		this.runWithProjectBinding = deps.runWithProjectBinding;
 		this.slackChannel = deps.slackChannel;
 		this.ownerUserId = deps.ownerUserId ?? null;
 	}
@@ -99,13 +110,14 @@ export class Scheduler {
 		}
 
 		this.db.run(
-			`INSERT INTO scheduled_jobs (id, name, description, enabled, schedule_kind, schedule_value, task, delivery_channel, delivery_target, next_run_at, delete_after_run, created_by)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO scheduled_jobs (id, name, description, enabled, project_name, schedule_kind, schedule_value, task, delivery_channel, delivery_target, next_run_at, delete_after_run, created_by)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			[
 				id,
 				input.name,
 				input.description ?? null,
 				input.enabled === false ? 0 : 1,
+				input.projectName ?? null,
 				input.schedule.kind,
 				scheduleValue,
 				input.task,
@@ -332,6 +344,7 @@ export class Scheduler {
 			slackChannel: this.slackChannel,
 			ownerUserId: this.ownerUserId,
 			notifyOwner: (text: string) => this.notifyOwner(text),
+			runWithProjectBinding: this.runWithProjectBinding,
 		});
 	}
 

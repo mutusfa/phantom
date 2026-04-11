@@ -171,13 +171,19 @@ function registerReviewRequest(server: McpServer, deps: ToolDependencies): void 
 					.optional()
 					.default("general")
 					.describe("What aspect to focus the review on"),
+				project: z
+					.string()
+					.optional()
+					.describe("Registered project name to bind for this review (cwd, context, project evolution)"),
 			}),
 		},
-		async ({ target, focus }): Promise<CallToolResult> => {
+		async ({ target, focus, project }): Promise<CallToolResult> => {
 			try {
 				const prompt = `Please review the following with a focus on ${focus}:\n\n${target}\n\nProvide specific, actionable feedback. Reference team conventions if known.`;
 
-				const response = await deps.runtime.handleMessage("mcp", `review-${Date.now()}`, prompt);
+				const run = deps.runWithProjectBinding ?? ((ch, conv, t) => deps.runtime.handleMessage(ch, conv, t));
+				const binding = project && project.length > 0 ? { projectName: project } : undefined;
+				const response = await run("mcp", `review-${Date.now()}`, prompt, undefined, binding);
 
 				return {
 					content: [

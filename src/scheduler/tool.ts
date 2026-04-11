@@ -70,6 +70,10 @@ export function createSchedulerToolServer(scheduler: Scheduler): McpSdkServerCon
 				.string()
 				.optional()
 				.describe("The prompt for the agent when the job fires (required for create, 32 KB max)"),
+			project_name: z
+				.string()
+				.optional()
+				.describe("Registered project name (phantom_project). Binds cwd, context, and evolution for this job."),
 			delivery: JobDeliverySchema.optional().describe("Where to deliver results"),
 			jobId: z.string().optional().describe("Job ID (for delete or run)"),
 		},
@@ -84,6 +88,7 @@ export function createSchedulerToolServer(scheduler: Scheduler): McpSdkServerCon
 						const job = scheduler.createJob({
 							name: input.name,
 							description: input.description,
+							projectName: input.project_name,
 							schedule: input.schedule,
 							task: input.task,
 							delivery: input.delivery,
@@ -108,6 +113,7 @@ export function createSchedulerToolServer(scheduler: Scheduler): McpSdkServerCon
 								id: j.id,
 								name: j.name,
 								description: j.description,
+								project_name: j.projectName,
 								enabled: j.enabled,
 								schedule: j.schedule,
 								status: j.status,

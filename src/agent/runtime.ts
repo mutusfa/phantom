@@ -9,9 +9,8 @@ import type { MemoryContextBuilder } from "../memory/context-builder.ts";
 import type { RoleTemplate } from "../roles/types.ts";
 import { executeChatQuery } from "./chat-query.ts";
 import { CostTracker } from "./cost-tracker.ts";
-import { type AgentCost, type AgentResponse, emptyCost } from "./events.ts";
-import { TraceWriter } from "./trace-writer.ts";
 import { formatEnvSnapshot, gatherEnvSnapshot } from "./env-snapshot.ts";
+import { type AgentCost, type AgentResponse, emptyCost } from "./events.ts";
 import { createDangerousCommandBlocker, createFileTracker } from "./hooks.ts";
 import { emitPluginInitSnapshot } from "./init-plugin-snapshot.ts";
 import { type JudgeQueryOptions, type JudgeQueryResult, runJudgeQuery } from "./judge-query.ts";
@@ -23,6 +22,7 @@ import { assemblePrompt } from "./prompt-assembler.ts";
 import { isNoConversationFoundResult, sdkResultErrorText } from "./sdk-result-errors.ts";
 import { SessionStore } from "./session-store.ts";
 import { getThinkingConfig } from "./thinking-config.ts";
+import { TraceWriter } from "./trace-writer.ts";
 
 export type RuntimeEvent =
 	| { type: "init"; sessionId: string }
@@ -87,6 +87,7 @@ export class AgentRuntime {
 		conversationId: string,
 		text: string,
 		onEvent?: (event: RuntimeEvent) => void,
+		projectOptions?: { context?: string; cwd?: string },
 	): Promise<AgentResponse> {
 		const sessionKey = `${channelId}:${conversationId}`;
 		const startTime = Date.now();
@@ -105,7 +106,15 @@ export class AgentRuntime {
 		const wrappedText = this.isExternalChannel(channelId) ? this.wrapWithSecurityContext(text) : text;
 
 		try {
-			return await this.runQuery(sessionKey, channelId, conversationId, wrappedText, startTime, onEvent);
+			return await this.runQuery(
+				sessionKey,
+				channelId,
+				conversationId,
+				wrappedText,
+				startTime,
+				onEvent,
+				projectOptions,
+			);
 		} finally {
 			this.activeSessions.delete(sessionKey);
 		}
@@ -181,6 +190,7 @@ export class AgentRuntime {
 		text: string,
 		startTime: number,
 		onEvent?: (event: RuntimeEvent) => void,
+		projectOptions?: { context?: string; cwd?: string },
 	): Promise<AgentResponse> {
 		let session = this.sessionStore.findActive(channelId, conversationId);
 		const isResume = session?.sdk_session_id != null;
@@ -210,6 +220,7 @@ export class AgentRuntime {
 			this.onboardingPrompt ?? undefined,
 			undefined,
 			envSnapshot,
+			projectOptions?.context,
 		);
 		const controller = new AbortController();
 		const timeoutMs = (this.config.timeout_minutes ?? 240) * 60 * 1000;
@@ -233,6 +244,7 @@ export class AgentRuntime {
 					model: queryModel,
 					...permissionOptions,
 					settingSources: ["project", "user"],
+					...(projectOptions?.cwd ? { cwd: projectOptions.cwd } : {}),
 					systemPrompt: {
 						type: "preset" as const,
 						preset: "claude_code" as const,

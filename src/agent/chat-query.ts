@@ -74,6 +74,7 @@ export async function executeChatQuery(
 		deps.onboardingPrompt ?? undefined,
 		undefined,
 		undefined,
+		undefined,
 		useMurphContextTransform ? undefined : initialSessionContext,
 	);
 	const transformContext = useMurphContextTransform

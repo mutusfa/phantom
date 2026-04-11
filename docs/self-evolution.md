@@ -106,6 +106,10 @@ phantom-config/
 
 ## Observability
 
+### Per-project evolved config
+
+When a session is bound to a registered project (see [Projects](projects.md)), approved **config** deltas for that session are written under `data/projects/<name>/evolved/` with the same file layout as above. That tree has its **own** `meta/version.json`, `meta/metrics.json`, and `meta/evolution-log.jsonl`. Global `phantom-config/meta/` is only updated by sessions that are not project-scoped for evolution.
+
 `metrics.json` carries three blocks:
 
 - `gate_stats`: fire/skip counters and per-call cost.
