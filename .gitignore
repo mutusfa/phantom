@@ -14,4 +14,4 @@ local/
 bun.lockb
 HANDOFFS.md
 plans/
-phantom-config/meta/metrics.json
+phantom-config/
