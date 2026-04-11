@@ -11,7 +11,9 @@ Usage:
   python3 linkedin_playwright.py messages <backend_urn> [limit]
   python3 linkedin_playwright.py links <backend_urn>          # extract external URLs from thread
   python3 linkedin_playwright.py invitations [limit]          # pending connection requests
-  python3 linkedin_playwright.py accept <id> <shared_secret>  # accept a connection request
+  python3 linkedin_playwright.py accept_by_name <name> [msg]  # accept invite by name, optionally reply
+  python3 linkedin_playwright.py ignore_by_name <name>        # dismiss invite by name
+  python3 linkedin_playwright.py accept <id> <shared_secret>  # accept via API (legacy)
   python3 linkedin_playwright.py accept_and_reply <id> <shared_secret> <name> <message>
   python3 linkedin_playwright.py send <backend_urn> <message>
   python3 linkedin_playwright.py login                        # force a fresh login
@@ -240,57 +242,96 @@ def get_links(page, backend_urn: str) -> list[dict]:
 
 
 def get_invitations(page, limit: int = 20) -> list[dict]:
-    """Fetch pending connection requests."""
-    data = voyager_fetch(
-        page,
-        f"/voyager/api/relationships/invitationViews?invitationType=CONNECTION&start=0&count={limit}",
-    )
-    included = data.get("included", [])
+    """Fetch pending connection requests by scraping the invitation manager page DOM.
 
-    # Build mini-profile lookup by URN
-    profiles: dict[str, dict] = {}
-    for item in included:
-        if "firstName" in item or "lastName" in item:
-            urn = item.get("entityUrn", "")
-            headline = item.get("headline", "")
-            if isinstance(headline, dict):
-                headline = headline.get("text", "")
-            profiles[urn] = {
-                "name": f"{item.get('firstName', '')} {item.get('lastName', '')}".strip(),
-                "occupation": item.get("occupation", ""),
-                "headline": headline,
-            }
+    The Voyager REST endpoint (/voyager/api/relationships/invitationViews) returns 400
+    as of April 2026. DOM scraping is the reliable fallback.
+    """
+    page.goto("https://www.linkedin.com/mynetwork/invitation-manager/", wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(5000)
 
-    invitations = []
-    for item in included:
-        if item.get("$type") != "com.linkedin.voyager.relationships.invitation.Invitation":
-            continue
-        invitation_id = item.get("entityUrn", "").split(":")[-1]
-        shared_secret = item.get("sharedSecret", "")
-        message = item.get("message", "") or item.get("customMessage", "") or ""
-        sent_time = item.get("sentTime", 0)
+    invitations = page.evaluate(f"""() => {{
+        const results = [];
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const acceptButtons = buttons.filter(b => b.innerText.trim() === 'Accept');
 
-        # Inviter profile URN is under *fromMember or fromMember
-        inviter_urn = item.get("*fromMember") or item.get("fromMember", "")
-        inviter = profiles.get(inviter_urn, {})
+        for (let i = 0; i < Math.min(acceptButtons.length, {limit}); i++) {{
+            const btn = acceptButtons[i];
 
-        invitations.append({
-            "invitation_id": invitation_id,
-            "shared_secret": shared_secret,
-            "name": inviter.get("name", "Unknown"),
-            "occupation": inviter.get("occupation", ""),
-            "headline": inviter.get("headline", ""),
-            "message": message[:300],
-            "sent_time": sent_time,
-        })
-        if len(invitations) >= limit:
-            break
+            // Walk up to find a container with the card text
+            let el = btn;
+            let cardText = '';
+            for (let j = 0; j < 12; j++) {{
+                el = el.parentElement;
+                if (!el) break;
+                const text = el.innerText;
+                if (text && text.length > 30 && text.includes('\\n')) {{
+                    cardText = text;
+                    break;
+                }}
+            }}
+
+            const lines = cardText.trim().split('\\n').map(l => l.trim()).filter(l => l);
+            const name = lines[0] || 'Unknown';
+            // Headline is typically the 3rd distinct line (after duplicate name)
+            const headline = lines.length > 2 ? lines[2] : (lines[1] || '');
+
+            // Extract message: lines after the time indicator and before Ignore/Accept
+            const timeIdx = lines.findIndex(l => /yesterday|ago|week|month|hour|minute/i.test(l));
+            let message = '';
+            if (timeIdx >= 0) {{
+                const afterTime = lines.slice(timeIdx + 1).filter(l => l !== 'Ignore' && l !== 'Accept' && !l.startsWith('Reply to') && !l.startsWith('Send a message'));
+                message = afterTime.join(' ').slice(0, 400);
+            }}
+
+            results.push({{
+                button_index: i,
+                name: name,
+                headline: headline,
+                message: message,
+            }});
+        }}
+        return results;
+    }}""")
 
     return invitations
 
 
+def ignore_invitation_by_index(page, button_index: int) -> dict:
+    """Dismiss a pending connection request by clicking the nth Ignore button on the invitation page."""
+    clicked = page.evaluate(f"""() => {{
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const ignores = buttons.filter(b => b.innerText.trim() === 'Ignore');
+        if (ignores[{button_index}]) {{ ignores[{button_index}].click(); return true; }}
+        return false;
+    }}""")
+    if not clicked:
+        raise RuntimeError(f"Ignore button at index {button_index} not found")
+    time.sleep(2)
+    return {"ok": True}
+
+
+def accept_invitation_by_index(page, button_index: int) -> dict:
+    """Accept a pending connection request by clicking the nth Accept button on the invitation page.
+
+    The page must already be on /mynetwork/invitation-manager/ (i.e. call get_invitations first).
+    The shared-secret API (/voyager/api/relationships/invitations/{id}?action=accept) requires
+    a sharedSecret that LinkedIn stopped embedding in the page as of April 2026.
+    """
+    clicked = page.evaluate(f"""() => {{
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const accepts = buttons.filter(b => b.innerText.trim() === 'Accept');
+        if (accepts[{button_index}]) {{ accepts[{button_index}].click(); return true; }}
+        return false;
+    }}""")
+    if not clicked:
+        raise RuntimeError(f"Accept button at index {button_index} not found")
+    time.sleep(3)
+    return {"ok": True}
+
+
 def accept_invitation(page, invitation_id: str, shared_secret: str) -> dict:
-    """Accept a pending connection request via Voyager API."""
+    """Accept a pending connection request via Voyager API (legacy, may fail if secret unavailable)."""
     path = f"/voyager/api/relationships/invitations/{invitation_id}?action=accept"
     voyager_post(page, path, {"invitationType": "CONNECTION", "sharedSecret": shared_secret})
     return {"ok": True}
@@ -462,6 +503,56 @@ def run_with_session(command: str, args: list[str]) -> dict:
                 send_result = send_message(page, backend_urn, reply)
                 save_session(context)
                 return {"ok": True, "accepted": True, "replied": send_result}
+
+            elif command == "accept_by_name":
+                # usage: accept_by_name <name> [reply_message]
+                # Fetches invitation list, finds by name, accepts via DOM click, optionally replies.
+                if not args:
+                    return {"error": "usage: accept_by_name <name> [reply_message]"}
+                target_name = args[0]
+                reply = args[1] if len(args) > 1 else None
+
+                invitations = get_invitations(page, limit=40)
+                match = next((inv for inv in invitations if inv["name"].lower() == target_name.lower()), None)
+                if not match:
+                    save_session(context)
+                    return {"error": f"No pending invitation from '{target_name}'"}
+
+                accept_invitation_by_index(page, match["button_index"])
+
+                if not reply:
+                    save_session(context)
+                    return {"ok": True, "accepted": True, "name": match["name"]}
+
+                backend_urn = find_conversation_with(page, profile_urn, match["name"])
+                if not backend_urn:
+                    save_session(context)
+                    return {
+                        "ok": True,
+                        "accepted": True,
+                        "name": match["name"],
+                        "warn": f"Accepted but could not find conversation - reply manually",
+                    }
+
+                send_result = send_message(page, backend_urn, reply)
+                save_session(context)
+                return {"ok": True, "accepted": True, "name": match["name"], "replied": send_result}
+
+            elif command == "ignore_by_name":
+                # usage: ignore_by_name <name>
+                if not args:
+                    return {"error": "usage: ignore_by_name <name>"}
+                target_name = args[0]
+
+                invitations = get_invitations(page, limit=40)
+                match = next((inv for inv in invitations if inv["name"].lower() == target_name.lower()), None)
+                if not match:
+                    save_session(context)
+                    return {"error": f"No pending invitation from '{target_name}'"}
+
+                ignore_invitation_by_index(page, match["button_index"])
+                save_session(context)
+                return {"ok": True, "ignored": True, "name": match["name"]}
 
             else:
                 return {"error": f"unknown command: {command}"}
