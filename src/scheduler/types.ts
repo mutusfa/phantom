@@ -35,6 +35,8 @@ export type ScheduledJob = {
 	id: string;
 	name: string;
 	description: string | null;
+	/** When set, the job runs with this registered project's cwd, context, and evolution tree. */
+	projectName: string | null;
 	enabled: boolean;
 	schedule: Schedule;
 	task: string;
@@ -56,6 +58,8 @@ export type ScheduledJob = {
 export type JobCreateInput = {
 	name: string;
 	description?: string;
+	/** Registered project name (see phantom_project / projects table). */
+	projectName?: string;
 	schedule: Schedule;
 	task: string;
 	delivery?: JobDelivery;
@@ -67,6 +71,7 @@ export type JobRow = {
 	id: string;
 	name: string;
 	description: string | null;
+	project_name: string | null;
 	enabled: number;
 	schedule_kind: string;
 	schedule_value: string;

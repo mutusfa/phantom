@@ -12,6 +12,7 @@ export function assemblePrompt(
 	onboardingPrompt?: string,
 	dataDir?: string,
 	envSnapshot?: string,
+	projectContext?: string,
 ): string {
 	const sections: string[] = [];
 
@@ -47,6 +48,11 @@ export function assemblePrompt(
 		if (evolved) {
 			sections.push(evolved);
 		}
+	}
+
+	// 6.5. Active project context (loaded from the project's context file)
+	if (projectContext) {
+		sections.push(`# Active Project\n\n${projectContext}`);
 	}
 
 	// 7. Instructions - how you work

@@ -249,7 +249,9 @@ export function buildReflectionPrompt(
 		'- Specify the tier ("immutable", "constrained", or "free")',
 		"",
 		"Domain rules:",
-		'- "config": phantom-config/ markdown files (user-profile.md, domain-knowledge.md, etc.)',
+		session.project_evolution_config_dir
+			? '- "config": markdown files in this session\'s project evolved directory only (same relative paths as phantom-config/: user-profile.md, domain-knowledge.md, strategies/*). Do not target global phantom-config/.'
+			: '- "config": phantom-config/ markdown files (user-profile.md, domain-knowledge.md, etc.)',
 		'- "source": TypeScript source files under src/ (only if capabilities.allow_source_changes is enabled)',
 		'- "skill": Claude Code skill files under .claude/skills/ (only if capabilities.allow_skill_creation is enabled)',
 		'- "tool": dynamic MCP tool registration (only if capabilities.allow_tool_registration is enabled)',
@@ -281,7 +283,10 @@ export function getCritiqueJsonSchema(): Record<string, unknown> {
 					properties: {
 						domain: { type: "string", enum: ["config", "source", "skill", "tool"] },
 						file: { type: "string" },
-						type: { type: "string", enum: ["append", "replace", "remove", "create_file", "register_tool", "unregister_tool"] },
+						type: {
+							type: "string",
+							enum: ["append", "replace", "remove", "create_file", "register_tool", "unregister_tool"],
+						},
 						content: { type: "string" },
 						target: { type: "string" },
 						rationale: { type: "string" },

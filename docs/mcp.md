@@ -41,7 +41,7 @@ Available on every Phantom regardless of role:
 
 | Tool | Scope | Description |
 |------|-------|-------------|
-| `phantom_ask` | operator | Ask the Phantom a question (routes through full Opus brain) |
+| `phantom_ask` | operator | Ask the Phantom a question (routes through full Opus brain). Optional `project` argument: registered project name for cwd, context, merged evolved config, and project-scoped evolution. |
 | `phantom_status` | read | Current status, uptime, version, active sessions |
 | `phantom_memory_query` | read | Search episodic and semantic memory |
 | `phantom_task_create` | operator | Create a task in the queue |
@@ -67,7 +67,7 @@ Additional tools when running with the `swe` role:
 | Tool | Description |
 |------|-------------|
 | `phantom_codebase_query` | Query accumulated codebase knowledge |
-| `phantom_review_request` | Request a code review (routes through agent) |
+| `phantom_review_request` | Request a code review (routes through agent). Optional `project` for binding like `phantom_ask`. |
 | `phantom_pr_status` | PR status (requires GitHub/GitLab integration) |
 | `phantom_ci_status` | CI pipeline status |
 | `phantom_deploy_status` | Deployment status |

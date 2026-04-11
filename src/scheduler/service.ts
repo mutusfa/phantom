@@ -9,16 +9,26 @@ const MAX_TIMER_MS = 60_000;
 const MAX_CONSECUTIVE_ERRORS = 10;
 const STARTUP_STAGGER_MS = 5_000;
 
+type RunWithProjectBinding = (
+	channelId: string,
+	conversationId: string,
+	text: string,
+	onEvent?: (event: import("../agent/runtime.ts").RuntimeEvent) => void,
+	explicit?: import("../projects/resolve-for-query.ts").ProjectBindingInput,
+) => Promise<import("../agent/events.ts").AgentResponse>;
+
 type SchedulerDeps = {
 	db: Database;
 	runtime: AgentRuntime;
 	slackChannel?: SlackChannel;
 	ownerUserId?: string;
+	runWithProjectBinding?: RunWithProjectBinding;
 };
 
 export class Scheduler {
 	private db: Database;
 	private runtime: AgentRuntime;
+	private runWithProjectBinding?: RunWithProjectBinding;
 	private slackChannel: SlackChannel | undefined;
 	private ownerUserId: string | undefined;
 	private timer: ReturnType<typeof setTimeout> | null = null;
@@ -28,6 +38,7 @@ export class Scheduler {
 	constructor(deps: SchedulerDeps) {
 		this.db = deps.db;
 		this.runtime = deps.runtime;
+		this.runWithProjectBinding = deps.runWithProjectBinding;
 		this.slackChannel = deps.slackChannel;
 		this.ownerUserId = deps.ownerUserId;
 	}
@@ -67,12 +78,13 @@ export class Scheduler {
 		const delivery = input.delivery ?? { channel: "slack", target: "owner" };
 
 		this.db.run(
-			`INSERT INTO scheduled_jobs (id, name, description, schedule_kind, schedule_value, task, delivery_channel, delivery_target, next_run_at, delete_after_run, created_by)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO scheduled_jobs (id, name, description, project_name, schedule_kind, schedule_value, task, delivery_channel, delivery_target, next_run_at, delete_after_run, created_by)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			[
 				id,
 				input.name,
 				input.description ?? null,
+				input.projectName ?? null,
 				input.schedule.kind,
 				scheduleValue,
 				input.task,
@@ -186,7 +198,9 @@ export class Scheduler {
 		let errorMsg: string | null = null;
 
 		try {
-			const response = await this.runtime.handleMessage("scheduler", `sched:${job.id}`, job.task);
+			const run = this.runWithProjectBinding ?? ((ch, conv, t) => this.runtime.handleMessage(ch, conv, t));
+			const binding = job.projectName ? { projectName: job.projectName } : undefined;
+			const response = await run("scheduler", `sched:${job.id}`, job.task, undefined, binding);
 			responseText = response.text;
 
 			if (responseText.startsWith("Error:")) {
@@ -316,6 +330,7 @@ function rowToJob(row: JobRow): ScheduledJob {
 		id: row.id,
 		name: row.name,
 		description: row.description,
+		projectName: row.project_name ?? null,
 		enabled: row.enabled === 1,
 		schedule,
 		task: row.task,

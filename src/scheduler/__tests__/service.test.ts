@@ -111,6 +111,19 @@ describe("Scheduler", () => {
 		expect(job.delivery).toEqual({ channel: "slack", target: "C04ABC123" });
 	});
 
+	test("createJob persists projectName", () => {
+		const scheduler = new Scheduler({ db, runtime: mockRuntime as never });
+		const job = scheduler.createJob({
+			name: "Proj job",
+			schedule: { kind: "every", intervalMs: 60_000 },
+			task: "Ping",
+			projectName: "receipt-models",
+		});
+		expect(job.projectName).toBe("receipt-models");
+		const again = scheduler.getJob(job.id);
+		expect(again?.projectName).toBe("receipt-models");
+	});
+
 	test("listJobs returns all jobs", () => {
 		const scheduler = new Scheduler({ db, runtime: mockRuntime as never });
 

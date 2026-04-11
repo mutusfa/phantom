@@ -72,6 +72,28 @@ describe("assemblePrompt Docker awareness", () => {
 	});
 });
 
+describe("assemblePrompt project context", () => {
+	test("includes project context section when provided", () => {
+		const prompt = assemblePrompt(baseConfig, undefined, undefined, undefined, undefined, undefined, undefined, "You are working on receipt-models. It uses Python 3.12 and PyTorch.");
+		expect(prompt).toContain("# Active Project");
+		expect(prompt).toContain("receipt-models");
+		expect(prompt).toContain("PyTorch");
+	});
+
+	test("omits project context section when not provided", () => {
+		const prompt = assemblePrompt(baseConfig);
+		expect(prompt).not.toContain("# Active Project");
+	});
+
+	test("project context appears between evolved config and instructions", () => {
+		const prompt = assemblePrompt(baseConfig, undefined, undefined, undefined, undefined, undefined, undefined, "Project context here");
+		const projectIdx = prompt.indexOf("# Active Project");
+		const instructionsIdx = prompt.indexOf("# How You Work");
+		expect(projectIdx).toBeGreaterThan(-1);
+		expect(instructionsIdx).toBeGreaterThan(projectIdx);
+	});
+});
+
 describe("assemblePrompt task completion verification", () => {
 	test("includes verification protocol in instructions", () => {
 		const prompt = assemblePrompt(baseConfig);

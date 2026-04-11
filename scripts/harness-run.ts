@@ -22,6 +22,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { EvolutionEngine } from "../src/evolution/engine.ts";
+import type { SessionSummary } from "../src/evolution/types.ts";
 
 type Manifest = {
 	project: string;
@@ -40,6 +42,8 @@ type Manifest = {
 	target_score?: number;
 	/** Max proposal iterations (default 10) */
 	max_iterations?: number;
+	/** Override project evolved config root (default: data/projects/<project>/evolved/) */
+	evolution_config_dir?: string;
 };
 
 type ScoreEntry = {
@@ -65,8 +69,8 @@ async function main(): Promise<void> {
 	let maxIterOverride: number | undefined;
 	let targetScoreOverride: number | undefined;
 	for (let i = 2; i < args.length; i++) {
-		if (args[i] === "--iterations" && args[i + 1]) maxIterOverride = parseInt(args[++i] as string);
-		if (args[i] === "--target-score" && args[i + 1]) targetScoreOverride = parseFloat(args[++i] as string);
+		if (args[i] === "--iterations" && args[i + 1]) maxIterOverride = Number.parseInt(args[++i] as string);
+		if (args[i] === "--target-score" && args[i + 1]) targetScoreOverride = Number.parseFloat(args[++i] as string);
 	}
 
 	const taskDir = join(process.cwd(), "data", "harness-runs", project, task);
@@ -87,9 +91,7 @@ async function main(): Promise<void> {
 	// Project-level autonomous context: instructions specific to Phantom sessions,
 	// separate from CLAUDE.md which is injected in all Claude Code sessions.
 	const projectContextPath = join(process.cwd(), "data", "harness-runs", project, "context.md");
-	const projectContext = existsSync(projectContextPath)
-		? readFileSync(projectContextPath, "utf-8")
-		: null;
+	const projectContext = existsSync(projectContextPath) ? readFileSync(projectContextPath, "utf-8") : null;
 	if (projectContext) {
 		console.log(`[harness] Loaded project context (${projectContextPath})`);
 	}
@@ -148,7 +150,7 @@ async function main(): Promise<void> {
 		const candidate = await runProposer(proposerPrompt, manifest.working_dir, projectContext);
 
 		if (!candidate.trim()) {
-			console.error(`[harness] Proposer returned empty response, stopping`);
+			console.error("[harness] Proposer returned empty response, stopping");
 			break;
 		}
 
@@ -173,7 +175,9 @@ async function main(): Promise<void> {
 		writeBestIfBetter(taskDir, vStr, score);
 
 		const newBest = readBest(taskDir) as BestEntry;
-		console.log(`[harness] ${vStr}: score=${score.toFixed(3)} | best=${newBest.version} (${newBest.score.toFixed(3)})\n`);
+		console.log(
+			`[harness] ${vStr}: score=${score.toFixed(3)} | best=${newBest.version} (${newBest.score.toFixed(3)})\n`,
+		);
 	}
 
 	const final = readBest(taskDir);
@@ -183,6 +187,42 @@ async function main(): Promise<void> {
 			console.log(`[harness] Target ${targetScore} not reached. Apply manually from:`);
 			console.log(`[harness]   ${join(candidatesDir, `${final.version}.${ext}`)}`);
 		}
+	}
+
+	const evoRoot = manifest.evolution_config_dir ?? join(process.cwd(), "data", "projects", project, "evolved");
+	const bestTracePath = final ? join(candidatesDir, `${final.version}.trace.jsonl`) : "";
+	const bestTrace =
+		bestTracePath && existsSync(bestTracePath) ? readFileSync(bestTracePath, "utf-8").slice(0, 12_000) : "(no trace)";
+	const harnessSummary: SessionSummary = {
+		session_id: `harness-${project}-${task}-${Date.now()}`,
+		session_key: `harness:${project}:${task}`,
+		user_id: "harness",
+		user_messages: [`${manifest.description} (harness task ${task})`],
+		assistant_messages: [
+			final
+				? `Best candidate ${final.version} score=${final.score.toFixed(3)}.\n\nEval trace excerpt:\n${bestTrace}`
+				: "Harness finished without a recorded best candidate.",
+		],
+		tools_used: [],
+		files_tracked: [candidatePath],
+		outcome: final && final.score > 0 ? "success" : "partial",
+		cost_usd: 0,
+		started_at: new Date().toISOString(),
+		ended_at: new Date().toISOString(),
+		project_evolution_config_dir: evoRoot,
+		bypass_cadence: true,
+	};
+
+	console.log("\n[harness] Running project-scoped evolution...");
+	try {
+		const engine = new EvolutionEngine();
+		const evoResult = await engine.afterSession(harnessSummary);
+		console.log(
+			`[harness] Project evolution done: version=${evoResult.version} applied=${evoResult.changes_applied.length} rejected=${evoResult.changes_rejected.length}`,
+		);
+	} catch (err: unknown) {
+		const msg = err instanceof Error ? err.message : String(err);
+		console.warn(`[harness] Project evolution failed: ${msg}`);
 	}
 }
 
@@ -210,9 +250,9 @@ function buildProposerPrompt(
 	const bestTracePath = join(candidatesDir, `${best.version}.trace.jsonl`);
 	const bestTrace = existsSync(bestTracePath)
 		? readFileSync(bestTracePath, "utf-8")
-			.split("\n")
-			.slice(0, 100) // cap at 100 lines to avoid bloating the prompt
-			.join("\n")
+				.split("\n")
+				.slice(0, 100) // cap at 100 lines to avoid bloating the prompt
+				.join("\n")
 		: "(no trace available)";
 
 	return `# Code Optimization Task
@@ -282,10 +322,7 @@ async function runProposer(prompt: string, workingDir: string, projectContext: s
 	return result.trim();
 }
 
-async function runEval(
-	manifest: Manifest,
-	taskDir: string,
-): Promise<{ score: number; output: string }> {
+async function runEval(manifest: Manifest, taskDir: string): Promise<{ score: number; output: string }> {
 	// Project env layered on top of a minimal safe base
 	const env: Record<string, string> = {
 		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
@@ -303,10 +340,7 @@ async function runEval(
 		env,
 	});
 
-	const [stdout, stderr] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-	]);
+	const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
 	const exitCode = await proc.exited;
 
 	const combined = stderr ? `${stdout}\nSTDERR:\n${stderr}` : stdout;
@@ -318,7 +352,7 @@ async function runEval(
 	// Optional fractional score: print "SCORE: 0.82" anywhere in stdout
 	const scoreMatch = combined.match(/SCORE:\s*([\d.]+)/i);
 	if (scoreMatch?.[1]) {
-		return { score: Math.min(1.0, Math.max(0.0, parseFloat(scoreMatch[1]))), output: combined };
+		return { score: Math.min(1.0, Math.max(0.0, Number.parseFloat(scoreMatch[1]))), output: combined };
 	}
 
 	return { score: 1.0, output: combined };

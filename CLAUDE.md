@@ -115,6 +115,7 @@ src/
     connection.ts       # Database connection
 config/                 # YAML configs (phantom.yaml, channels.yaml, mcp.yaml, roles/)
 phantom-config/         # Evolved agent config (constitution, persona, domain knowledge)
+data/projects/<name>/   # Per-project context.md + evolved/ (separate evolution version stream)
 public/                 # Web UI files (_base.html template, index.html)
 scripts/
   install.sh            # Standalone install script for Ubuntu/Debian

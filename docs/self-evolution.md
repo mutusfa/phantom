@@ -75,9 +75,13 @@ phantom-config/
 
 These files are injected into the system prompt. Day 1, they are nearly empty. Day 30, they are dense with specific knowledge.
 
+### Per-project evolved config
+
+When a session is bound to a registered project (see [Projects](projects.md)), approved **config** deltas for that session are written under `data/projects/<name>/evolved/` with the same file layout as above. That tree has its **own** `meta/version.json`, `meta/metrics.json`, and `meta/evolution-log.jsonl`. Global `phantom-config/meta/` is only updated by sessions that are not project-scoped for evolution.
+
 ## Versioning
 
-Every change creates a new version in `phantom-config/version.json`:
+Every global change creates a new version in `phantom-config/meta/version.json`:
 
 ```json
 {

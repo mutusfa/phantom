@@ -160,6 +160,8 @@ config/
   mcp.yaml         - MCP auth tokens
   roles/           - Role YAML definitions
 phantom-config/    - Evolved config (grows over time)
-data/              - SQLite database
+data/              - SQLite database, per-project context under data/projects/<name>/
 docs/              - Documentation
 ```
+
+See [Projects](projects.md) for per-project context, binding, and evolution.

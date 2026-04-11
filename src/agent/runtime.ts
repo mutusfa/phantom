@@ -6,12 +6,12 @@ import type { EvolvedConfig } from "../evolution/types.ts";
 import type { MemoryContextBuilder } from "../memory/context-builder.ts";
 import type { RoleTemplate } from "../roles/types.ts";
 import { CostTracker } from "./cost-tracker.ts";
-import { type AgentCost, type AgentResponse, emptyCost } from "./events.ts";
-import { TraceWriter } from "./trace-writer.ts";
 import { formatEnvSnapshot, gatherEnvSnapshot } from "./env-snapshot.ts";
+import { type AgentCost, type AgentResponse, emptyCost } from "./events.ts";
 import { createDangerousCommandBlocker, createFileTracker } from "./hooks.ts";
 import { assemblePrompt } from "./prompt-assembler.ts";
 import { SessionStore } from "./session-store.ts";
+import { TraceWriter } from "./trace-writer.ts";
 
 export type RuntimeEvent =
 	| { type: "init"; sessionId: string }
@@ -67,6 +67,7 @@ export class AgentRuntime {
 		conversationId: string,
 		text: string,
 		onEvent?: (event: RuntimeEvent) => void,
+		projectOptions?: { context?: string; cwd?: string },
 	): Promise<AgentResponse> {
 		const sessionKey = `${channelId}:${conversationId}`;
 		const startTime = Date.now();
@@ -85,7 +86,15 @@ export class AgentRuntime {
 		const wrappedText = this.isExternalChannel(channelId) ? this.wrapWithSecurityContext(text) : text;
 
 		try {
-			return await this.runQuery(sessionKey, channelId, conversationId, wrappedText, startTime, onEvent);
+			return await this.runQuery(
+				sessionKey,
+				channelId,
+				conversationId,
+				wrappedText,
+				startTime,
+				onEvent,
+				projectOptions,
+			);
 		} finally {
 			this.activeSessions.delete(sessionKey);
 		}
@@ -119,6 +128,7 @@ export class AgentRuntime {
 		text: string,
 		startTime: number,
 		onEvent?: (event: RuntimeEvent) => void,
+		projectOptions?: { context?: string; cwd?: string },
 	): Promise<AgentResponse> {
 		let session = this.sessionStore.findActive(channelId, conversationId);
 		const isResume = session?.sdk_session_id != null;
@@ -148,6 +158,7 @@ export class AgentRuntime {
 			this.onboardingPrompt ?? undefined,
 			undefined,
 			envSnapshot,
+			projectOptions?.context,
 		);
 		const controller = new AbortController();
 		const timeoutMs = (this.config.timeout_minutes ?? 240) * 60 * 1000;
@@ -168,6 +179,7 @@ export class AgentRuntime {
 					permissionMode: "bypassPermissions",
 					allowDangerouslySkipPermissions: true,
 					settingSources: ["project"],
+					...(projectOptions?.cwd ? { cwd: projectOptions.cwd } : {}),
 					systemPrompt: {
 						type: "preset" as const,
 						preset: "claude_code" as const,

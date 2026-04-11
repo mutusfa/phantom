@@ -93,6 +93,13 @@ export type SessionSummary = {
 	ended_at: string;
 	/** Path to the JSONL trace file for this session (tool calls + inputs) */
 	trace_file?: string;
+	/**
+	 * When set, the evolution pipeline uses this directory as the config root
+	 * (separate meta/version.json and metrics from global phantom-config/).
+	 */
+	project_evolution_config_dir?: string;
+	/** When true, run the reflection pipeline even if reflection_interval cadence would skip. */
+	bypass_cadence?: boolean;
 };
 
 export type CritiqueResult = {
@@ -149,3 +156,31 @@ export type EvolvedConfig = {
 		metricsSnapshot: MetricsSnapshot;
 	};
 };
+
+/**
+ * Merge global and project-scoped evolved configs.
+ * Non-empty project fields are appended to global fields (additive, not replacing).
+ * Constitution is never overridden by project config (immutable principle).
+ */
+export function mergeEvolvedConfigs(global: EvolvedConfig, project: EvolvedConfig): EvolvedConfig {
+	const append = (a: string, b: string): string => {
+		const trimA = a.trim();
+		const trimB = b.trim();
+		if (!trimB) return trimA;
+		if (!trimA) return trimB;
+		return `${trimA}\n\n${trimB}`;
+	};
+
+	return {
+		constitution: global.constitution,
+		persona: append(global.persona, project.persona),
+		userProfile: append(global.userProfile, project.userProfile),
+		domainKnowledge: append(global.domainKnowledge, project.domainKnowledge),
+		strategies: {
+			taskPatterns: append(global.strategies.taskPatterns, project.strategies.taskPatterns),
+			toolPreferences: append(global.strategies.toolPreferences, project.strategies.toolPreferences),
+			errorRecovery: append(global.strategies.errorRecovery, project.strategies.errorRecovery),
+		},
+		meta: global.meta,
+	};
+}

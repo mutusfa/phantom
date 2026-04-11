@@ -116,4 +116,21 @@ export const MIGRATIONS: string[] = [
 	// Behavior eval: per-session intervention counts from heuristic detection
 	`ALTER TABLE sessions ADD COLUMN correction_count INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE sessions ADD COLUMN confirmation_count INTEGER NOT NULL DEFAULT 0`,
+
+	// Per-project context: named projects with working directory and context file
+	`CREATE TABLE IF NOT EXISTS projects (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT UNIQUE NOT NULL,
+		working_dir TEXT,
+		context_path TEXT,
+		created_at TEXT NOT NULL DEFAULT (datetime('now')),
+		updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`,
+	`ALTER TABLE sessions ADD COLUMN project_id INTEGER REFERENCES projects(id)`,
+
+	// Per-project evolution: optional config directory for project-scoped evolved config
+	`ALTER TABLE projects ADD COLUMN evolution_config_dir TEXT`,
+
+	// Scheduler: bind scheduled runs to a named project (cwd, context, merged evolved prompt, evolution scope)
+	`ALTER TABLE scheduled_jobs ADD COLUMN project_name TEXT`,
 ];

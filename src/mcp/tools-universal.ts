@@ -2,10 +2,13 @@ import type { Database } from "bun:sqlite";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import type { AgentResponse } from "../agent/events.ts";
 import type { AgentRuntime } from "../agent/runtime.ts";
+import type { RuntimeEvent } from "../agent/runtime.ts";
 import type { PhantomConfig } from "../config/types.ts";
 import type { EvolutionEngine } from "../evolution/engine.ts";
 import type { MemorySystem } from "../memory/system.ts";
+import type { ProjectBindingInput } from "../projects/resolve-for-query.ts";
 
 export type ToolDependencies = {
 	config: PhantomConfig;
@@ -14,6 +17,14 @@ export type ToolDependencies = {
 	runtime: AgentRuntime;
 	memory: MemorySystem | null;
 	evolution: EvolutionEngine | null;
+	/** Applies project cwd, context, merged evolved config when provided (same as channel router). */
+	runWithProjectBinding?: (
+		channelId: string,
+		conversationId: string,
+		text: string,
+		onEvent?: (event: RuntimeEvent) => void,
+		explicit?: ProjectBindingInput,
+	) => Promise<AgentResponse>;
 };
 
 export function registerUniversalTools(server: McpServer, deps: ToolDependencies): void {
@@ -244,11 +255,17 @@ function registerPhantomAsk(server: McpServer, deps: ToolDependencies): void {
 			inputSchema: z.object({
 				message: z.string().min(1).describe("The question or request"),
 				urgency: z.enum(["low", "normal", "high"]).optional().default("normal").describe("Priority level"),
+				project: z
+					.string()
+					.optional()
+					.describe("Registered project name to bind for this call (cwd, context, project evolution)"),
 			}),
 		},
-		async ({ message, urgency: _urgency }): Promise<CallToolResult> => {
+		async ({ message, urgency: _urgency, project }): Promise<CallToolResult> => {
 			try {
-				const response = await deps.runtime.handleMessage("mcp", `ask-${Date.now()}`, message);
+				const run = deps.runWithProjectBinding ?? ((ch, conv, t) => deps.runtime.handleMessage(ch, conv, t));
+				const binding = project && project.length > 0 ? { projectName: project } : undefined;
+				const response = await run("mcp", `ask-${Date.now()}`, message, undefined, binding);
 				return {
 					content: [
 						{

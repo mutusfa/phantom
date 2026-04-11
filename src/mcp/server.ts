@@ -38,6 +38,7 @@ export type PhantomMcpServerDeps = {
 	memory: MemorySystem | null;
 	evolution: EvolutionEngine | null;
 	roleId?: string;
+	runWithProjectBinding?: import("./tools-universal.ts").ToolDependencies["runWithProjectBinding"];
 };
 
 export class PhantomMcpServer {
@@ -68,6 +69,7 @@ export class PhantomMcpServer {
 			runtime: deps.runtime,
 			memory: deps.memory,
 			evolution: deps.evolution,
+			runWithProjectBinding: deps.runWithProjectBinding,
 		};
 
 		this.transportManager = new McpTransportManager(() => this.createMcpServer());

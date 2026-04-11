@@ -5,6 +5,7 @@ import { type EvolutionConfig, loadEvolutionConfig } from "./config.ts";
 import { recordObservations, runConsolidation } from "./consolidation.ts";
 import { ConstitutionChecker } from "./constitution.ts";
 import { addCase, loadSuite, pruneSuite } from "./golden-suite.ts";
+import { isJudgeAvailable } from "./judges/client.ts";
 import { runQualityJudge } from "./judges/quality-judge.ts";
 import { type JudgeCosts, emptyJudgeCosts } from "./judges/types.ts";
 import {
@@ -17,16 +18,23 @@ import {
 	updateAfterRollback,
 	updateAfterSession,
 } from "./metrics.ts";
-import { isJudgeAvailable } from "./judges/client.ts";
+import { deriveProjectEvolutionConfig } from "./project-evolution-config.ts";
 import {
 	buildCritiqueFromObservations,
 	extractObservations,
 	extractObservationsWithLLM,
 	generateDeltas,
 } from "./reflection.ts";
-import type { EvolutionResult, EvolutionVersion, EvolvedConfig, GoldenCase, SessionSummary } from "./types.ts";
+import {
+	type EvolutionResult,
+	type EvolutionVersion,
+	type EvolvedConfig,
+	type GoldenCase,
+	type SessionSummary,
+	mergeEvolvedConfigs,
+} from "./types.ts";
 import { validateAll, validateAllWithJudges } from "./validation.ts";
-import { getHistory, readVersion, rollback as versionRollback } from "./versioning.ts";
+import { getHistory, readVersion, rollback as versionRollbackFn } from "./versioning.ts";
 
 export class EvolutionEngine {
 	private config: EvolutionConfig;
@@ -87,21 +95,28 @@ export class EvolutionEngine {
 	async afterSession(session: SessionSummary): Promise<EvolutionResult> {
 		const startTime = Date.now();
 		const judgeCosts = emptyJudgeCosts();
+		const evoConfig: EvolutionConfig = session.project_evolution_config_dir
+			? deriveProjectEvolutionConfig(this.config, session.project_evolution_config_dir)
+			: this.config;
+		const mergedForReflection =
+			session.project_evolution_config_dir != null && session.project_evolution_config_dir.length > 0
+				? mergeEvolvedConfigs(this.getConfig(), this.getProjectConfig(session.project_evolution_config_dir))
+				: this.getConfig();
 
 		// Cadence check: skip the reflection pipeline until reflection_interval sessions have passed.
 		// Read pre-update metrics so the check runs before updateAfterSession increments the counter.
-		const preMetrics = readMetrics(this.config);
-		const interval = this.config.cadence.reflection_interval;
-		if ((preMetrics.sessions_since_reflection ?? 0) < interval - 1) {
-			updateAfterSession(this.config, session.outcome, false);
-			return { version: this.getCurrentVersion(), changes_applied: [], changes_rejected: [] };
+		const preMetrics = readMetrics(evoConfig);
+		const interval = evoConfig.cadence.reflection_interval;
+		const cadenceSkips = !session.bypass_cadence && (preMetrics.sessions_since_reflection ?? 0) < interval - 1;
+		if (cadenceSkips) {
+			updateAfterSession(evoConfig, session.outcome, false);
+			return { version: readVersion(evoConfig).version, changes_applied: [], changes_rejected: [] };
 		}
 
 		// Step 1: Observation Extraction (LLM or heuristic)
 		let observations: import("./types.ts").SessionObservation[];
 		if (this.llmJudgesEnabled && !this.isDailyCostCapReached()) {
-			const currentConfig = this.getConfig();
-			const result = await extractObservationsWithLLM(session, currentConfig, this.config.reflection.model);
+			const result = await extractObservationsWithLLM(session, mergedForReflection, evoConfig.reflection.model);
 			observations = result.observations;
 			if (result.judgeCost) {
 				addCost(judgeCosts.observation_extraction, result.judgeCost);
@@ -113,48 +128,59 @@ export class EvolutionEngine {
 
 		// Step 0: Update session metrics (after extraction so hadCorrections uses observation results)
 		const hadCorrections = observations.some((o) => o.type === "correction");
-		updateAfterSession(this.config, session.outcome, hadCorrections);
+		updateAfterSession(evoConfig, session.outcome, hadCorrections);
 		// Reset reflection counter after updateAfterSession so the next cycle is a full interval.
-		resetReflectionCounter(this.config);
+		resetReflectionCounter(evoConfig);
 
 		if (observations.length === 0) {
-			return { version: this.getCurrentVersion(), changes_applied: [], changes_rejected: [] };
+			return { version: readVersion(evoConfig).version, changes_applied: [], changes_rejected: [] };
 		}
 
 		// Record observations for later consolidation
-		recordObservations(this.config, session.session_id, observations);
+		recordObservations(evoConfig, session.session_id, observations);
 
 		// Step 2: Self-Critique (uses observations to build critique)
-		const currentConfig = this.getConfig();
-		const critique = buildCritiqueFromObservations(observations, session, currentConfig);
+		const critique = buildCritiqueFromObservations(observations, session, mergedForReflection);
 
 		// Step 3: Config Delta Generation
 		const deltas = generateDeltas(critique, session.session_id);
 		if (deltas.length === 0) {
-			return { version: this.getCurrentVersion(), changes_applied: [], changes_rejected: [] };
+			return { version: readVersion(evoConfig).version, changes_applied: [], changes_rejected: [] };
 		}
 
 		// Step 4: 5-Gate Validation (LLM or heuristic)
-		const goldenSuite = loadSuite(this.config);
+		const goldenSuite = loadSuite(evoConfig);
 		let validationResults: import("./types.ts").ValidationResult[];
 
 		if (this.llmJudgesEnabled && !this.isDailyCostCapReached()) {
-			const judgeResult = await validateAllWithJudges(deltas, this.checker, goldenSuite, this.config, currentConfig);
+			const judgeResult = await validateAllWithJudges(
+				deltas,
+				this.checker,
+				goldenSuite,
+				evoConfig,
+				mergedForReflection,
+			);
 			validationResults = judgeResult.results;
 			mergeCosts(judgeCosts, judgeResult.judgeCosts);
 			this.incrementDailyCost(totalCostFromJudgeCosts(judgeResult.judgeCosts));
 		} else {
-			validationResults = validateAll(deltas, this.checker, goldenSuite, this.config);
+			validationResults = validateAll(deltas, this.checker, goldenSuite, evoConfig);
 		}
 
 		// Step 5: Application
-		const metricsSnapshot = getMetricsSnapshot(this.config);
-		const { applied, rejected } = applyApproved(validationResults, this.config, session.session_id, metricsSnapshot, this.toolRegistry);
+		const metricsSnapshot = getMetricsSnapshot(evoConfig);
+		const { applied, rejected } = applyApproved(
+			validationResults,
+			evoConfig,
+			session.session_id,
+			metricsSnapshot,
+			this.toolRegistry,
+		);
 
 		if (applied.length > 0) {
-			updateAfterEvolution(this.config);
+			updateAfterEvolution(evoConfig);
 			console.log(
-				`[evolution] Applied ${applied.length} changes (v${this.getCurrentVersion()}) in ${Date.now() - startTime}ms`,
+				`[evolution] Applied ${applied.length} changes (v${readVersion(evoConfig).version}) in ${Date.now() - startTime}ms`,
 			);
 
 			// Promote successful corrections to golden suite
@@ -167,7 +193,7 @@ export class EvolutionEngine {
 						session_id: session.session_id,
 						created_at: new Date().toISOString(),
 					};
-					addCase(this.config, goldenCase);
+					addCase(evoConfig, goldenCase);
 				}
 			}
 		}
@@ -182,7 +208,7 @@ export class EvolutionEngine {
 		// Quality Assessment (LLM only, non-blocking)
 		if (this.llmJudgesEnabled && !this.isDailyCostCapReached()) {
 			try {
-				const qualityResult = await runQualityJudge(session, currentConfig);
+				const qualityResult = await runQualityJudge(session, mergedForReflection);
 				judgeCosts.quality_assessment.calls++;
 				judgeCosts.quality_assessment.totalUsd += qualityResult.costUsd;
 				judgeCosts.quality_assessment.totalInputTokens += qualityResult.inputTokens;
@@ -204,11 +230,11 @@ export class EvolutionEngine {
 		}
 
 		// Step 6: Periodic Consolidation (if cadence reached)
-		const metrics = readMetrics(this.config);
-		if (metrics.sessions_since_consolidation >= this.config.cadence.consolidation_interval) {
+		const metrics = readMetrics(evoConfig);
+		if (metrics.sessions_since_consolidation >= evoConfig.cadence.consolidation_interval) {
 			try {
-				const report = runConsolidation(this.config);
-				resetConsolidationCounter(this.config);
+				const report = runConsolidation(evoConfig);
+				resetConsolidationCounter(evoConfig);
 				console.log(
 					`[evolution] Consolidation: ${report.principlesExtracted} principles, ` +
 						`${report.observationsPruned} observations pruned`,
@@ -220,22 +246,31 @@ export class EvolutionEngine {
 		}
 
 		// Check auto-rollback
-		const rollbackCheck = checkForAutoRollback(this.config);
+		const rollbackCheck = checkForAutoRollback(evoConfig);
 		if (rollbackCheck.shouldRollback) {
 			console.warn(`[evolution] Auto-rollback triggered: ${rollbackCheck.reason}`);
-			this.rollback(this.getCurrentVersion() - 1);
+			const currentV = readVersion(evoConfig).version;
+			if (currentV > 0) {
+				versionRollbackFn(evoConfig, currentV - 1);
+				updateAfterRollback(evoConfig);
+				console.log(`[evolution] Rolled back to version ${currentV - 1}`);
+			}
 		}
 
 		// Record judge costs to persistent metrics (daily tracking already done incrementally above)
 		if (this.llmJudgesEnabled) {
-			this.recordJudgeCosts(judgeCosts);
+			this.recordJudgeCosts(judgeCosts, evoConfig);
 		}
 
 		// Enforce golden suite cap
-		this.pruneGoldenSuite();
+		const maxGolden = evoConfig.judges?.max_golden_suite_size ?? 50;
+		const removed = pruneSuite(evoConfig, maxGolden);
+		if (removed > 0) {
+			console.log(`[evolution] Pruned ${removed} oldest golden suite entries (cap: ${maxGolden})`);
+		}
 
 		return {
-			version: this.getCurrentVersion(),
+			version: readVersion(evoConfig).version,
 			changes_applied: applied,
 			changes_rejected: rejected.map((r) => ({ change: r.change, reasons: r.reasons })),
 		};
@@ -263,6 +298,31 @@ export class EvolutionEngine {
 		};
 	}
 
+	/**
+	 * Read project-scoped evolved config from a separate directory.
+	 * Returns only fields that have content; the caller merges with global config.
+	 */
+	getProjectConfig(configDir: string): EvolvedConfig {
+		const globalVersion = readVersion(this.config);
+		const metricsSnapshot = getMetricsSnapshot(this.config);
+
+		return {
+			constitution: readConfigFile(join(configDir, "constitution.md")),
+			persona: readConfigFile(join(configDir, "persona.md")),
+			userProfile: readConfigFile(join(configDir, "user-profile.md")),
+			domainKnowledge: readConfigFile(join(configDir, "domain-knowledge.md")),
+			strategies: {
+				taskPatterns: readConfigFile(join(configDir, "strategies/task-patterns.md")),
+				toolPreferences: readConfigFile(join(configDir, "strategies/tool-preferences.md")),
+				errorRecovery: readConfigFile(join(configDir, "strategies/error-recovery.md")),
+			},
+			meta: {
+				version: globalVersion.version,
+				metricsSnapshot,
+			},
+		};
+	}
+
 	getCurrentVersion(): number {
 		return readVersion(this.config).version;
 	}
@@ -276,7 +336,7 @@ export class EvolutionEngine {
 	}
 
 	rollback(toVersion: number): void {
-		versionRollback(this.config, toVersion);
+		versionRollbackFn(this.config, toVersion);
 		updateAfterRollback(this.config);
 		console.log(`[evolution] Rolled back to version ${toVersion}`);
 	}
@@ -306,16 +366,8 @@ export class EvolutionEngine {
 		this.dailyCostUsd += usd;
 	}
 
-	private pruneGoldenSuite(): void {
-		const maxSize = this.config.judges?.max_golden_suite_size ?? 50;
-		const removed = pruneSuite(this.config, maxSize);
-		if (removed > 0) {
-			console.log(`[evolution] Pruned ${removed} oldest golden suite entries (cap: ${maxSize})`);
-		}
-	}
-
-	private recordJudgeCosts(costs: JudgeCosts): void {
-		const metricsPath = this.config.paths.metrics_file;
+	private recordJudgeCosts(costs: JudgeCosts, metricsConfig: EvolutionConfig = this.config): void {
+		const metricsPath = metricsConfig.paths.metrics_file;
 		try {
 			const raw = readFileSync(metricsPath, "utf-8");
 			const metrics = JSON.parse(raw);

@@ -1,9 +1,9 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { logger } from "./core/logger.ts";
 import { createInProcessToolServer } from "./agent/in-process-tools.ts";
 import { AgentRuntime } from "./agent/runtime.ts";
 import type { RuntimeEvent } from "./agent/runtime.ts";
+import { type AdoPrCommentEvent, AdoWebhookHandler } from "./channels/ado-webhook.ts";
 import { CliChannel } from "./channels/cli.ts";
 import { EmailChannel } from "./channels/email.ts";
 import { emitFeedback, setFeedbackHandler } from "./channels/feedback.ts";
@@ -14,10 +14,10 @@ import { setActionFollowUpHandler } from "./channels/slack-actions.ts";
 import { SlackChannel } from "./channels/slack.ts";
 import { createStatusReactionController } from "./channels/status-reactions.ts";
 import { TelegramChannel } from "./channels/telegram.ts";
-import { AdoPrCommentEvent, AdoWebhookHandler } from "./channels/ado-webhook.ts";
 import { WebhookChannel } from "./channels/webhook.ts";
 import { loadChannelsConfig, loadConfig } from "./config/loader.ts";
 import { installShutdownHandlers, onShutdown } from "./core/graceful.ts";
+import { logger } from "./core/logger.ts";
 import {
 	setAdoWebhookHandler,
 	setChannelHealthProvider,
@@ -34,6 +34,7 @@ import {
 import { closeDatabase, getDatabase } from "./db/connection.ts";
 import { runMigrations } from "./db/migrate.ts";
 import { createEmailToolServer } from "./email/tool.ts";
+import { detectInterventions } from "./eval/intervention-detector.ts";
 import { EvolutionEngine } from "./evolution/engine.ts";
 import type { SessionSummary } from "./evolution/types.ts";
 import { PeerHealthMonitor } from "./mcp/peer-health.ts";
@@ -47,11 +48,13 @@ import { isFirstRun, isOnboardingInProgress } from "./onboarding/detection.ts";
 import { type OnboardingTarget, startOnboarding } from "./onboarding/flow.ts";
 import { buildOnboardingPrompt } from "./onboarding/prompt.ts";
 import { getOnboardingStatus } from "./onboarding/state.ts";
+import { ProjectRegistry } from "./projects/registry.ts";
+import { type ProjectBindingInput, resolveProjectForQuery } from "./projects/resolve-for-query.ts";
+import { createProjectToolServer } from "./projects/tool.ts";
 import { createRoleRegistry } from "./roles/registry.ts";
 import type { RoleTemplate } from "./roles/types.ts";
 import { Scheduler } from "./scheduler/service.ts";
 import { createSchedulerToolServer } from "./scheduler/tool.ts";
-import { detectInterventions } from "./eval/intervention-detector.ts";
 import { getSecretRequest } from "./secrets/store.ts";
 import { createSecretToolServer } from "./secrets/tools.ts";
 import { setPublicDir, setSecretSavedCallback, setSecretsDb } from "./ui/serve.ts";
@@ -100,6 +103,12 @@ async function main(): Promise<void> {
 	setSecretsDb(db);
 	console.log("[phantom] Database ready");
 
+	const projectRegistry = new ProjectRegistry(db);
+	const projectCount = projectRegistry.list().length;
+	if (projectCount > 0) {
+		console.log(`[projects] ${projectCount} project(s) registered`);
+	}
+
 	// Seed working memory file if it does not exist yet
 	const wmPath = join(process.cwd(), "data", "working-memory.md");
 	if (!existsSync(wmPath)) {
@@ -140,16 +149,37 @@ async function main(): Promise<void> {
 		runtime.setEvolvedConfig(evolution.getConfig());
 	}
 
+	const runWithProjectBinding = async (
+		channelId: string,
+		conversationId: string,
+		text: string,
+		onEvent?: (event: RuntimeEvent) => void,
+		explicit?: ProjectBindingInput,
+	) => {
+		const resolved = resolveProjectForQuery(projectRegistry, evolution, channelId, conversationId, explicit);
+		if (resolved.mergedEvolvedForQuery && evolution) {
+			runtime.setEvolvedConfig(resolved.mergedEvolvedForQuery);
+		}
+		try {
+			return await runtime.handleMessage(channelId, conversationId, text, onEvent, resolved.projectOptions);
+		} finally {
+			if (resolved.mergedEvolvedForQuery && evolution) {
+				runtime.setEvolvedConfig(evolution.getConfig());
+			}
+		}
+	};
+
 	// Wire feedback to evolution engine
 	setFeedbackHandler((signal) => {
 		console.log(`[feedback] ${signal.type} from ${signal.source} (${signal.conversationId})`);
 
 		// Persist the reaction so the behavior eval script can query it later
 		try {
-			db.run(
-				`INSERT INTO session_feedback (session_key, type, source) VALUES (?, ?, ?)`,
-				[signal.conversationId, signal.type, signal.source],
-			);
+			db.run("INSERT INTO session_feedback (session_key, type, source) VALUES (?, ?, ?)", [
+				signal.conversationId,
+				signal.type,
+				signal.source,
+			]);
 		} catch (err: unknown) {
 			const errMsg = err instanceof Error ? err.message : String(err);
 			console.warn(`[feedback] Failed to persist feedback: ${errMsg}`);
@@ -184,6 +214,10 @@ async function main(): Promise<void> {
 		}
 	});
 
+	// Mutable holder so the project tool factory can read the active session key.
+	// Set in the message handler before each runtime.handleMessage call.
+	let activeSessionKey: string | null = null;
+
 	let mcpServer: PhantomMcpServer | null = null;
 	let scheduler: Scheduler | null = null;
 	try {
@@ -195,6 +229,7 @@ async function main(): Promise<void> {
 			memory: memory.isReady() ? memory : null,
 			evolution,
 			roleId: activeRole?.id,
+			runWithProjectBinding,
 		});
 		setMcpServerProvider(() => mcpServer);
 
@@ -205,13 +240,15 @@ async function main(): Promise<void> {
 		// dynamic MCP tools as an evolution outcome (when allow_tool_registration is enabled).
 		if (evolution) {
 			evolution.setToolRegistry({
-				register: (params) => { registry.register({ ...params, input_schema: params.input_schema ?? {} }); },
+				register: (params) => {
+					registry.register({ ...params, input_schema: params.input_schema ?? {} });
+				},
 				unregister: (name) => registry.unregister(name),
 			});
 		}
 
 		// Wire scheduler into the agent (Slack channel set later after channel init)
-		scheduler = new Scheduler({ db, runtime });
+		scheduler = new Scheduler({ db, runtime, runWithProjectBinding });
 
 		// Pass factories (not singletons) so each query() gets fresh MCP server instances.
 		// The underlying registries (DynamicToolRegistry, Scheduler) are singletons.
@@ -224,6 +261,7 @@ async function main(): Promise<void> {
 			"phantom-scheduler": () => createSchedulerToolServer(scheduler as Scheduler),
 			"phantom-web-ui": () => createWebUiToolServer(config.public_url),
 			"phantom-secrets": () => createSecretToolServer({ db, baseUrl: secretsBaseUrl }),
+			"phantom-projects": () => createProjectToolServer(projectRegistry, undefined, () => activeSessionKey),
 			...(process.env.RESEND_API_KEY
 				? {
 						"phantom-email": () =>
@@ -380,7 +418,9 @@ async function main(): Promise<void> {
 			if (existing) {
 				// Already waiting - just append the new comment; timer stays as-is
 				existing.events.push(event);
-				console.log(`[ado-webhook] Buffered comment for PR #${event.prId} (${existing.events.length} total, timer already running)`);
+				console.log(
+					`[ado-webhook] Buffered comment for PR #${event.prId} (${existing.events.length} total, timer already running)`,
+				);
 				return;
 			}
 
@@ -389,14 +429,12 @@ async function main(): Promise<void> {
 			const timer = setTimeout(async () => {
 				pendingPrBatches.delete(event.prId);
 				const commentList = events.map((e, i) => `${i + 1}. ${e.author}: "${e.comment}"`).join("\n");
-				const prompt =
-					`ADO service hook: ${events.length} comment(s) on PR #${event.prId} ("${event.prTitle}") ` +
-					`in ${event.project}/${event.repo}:\n\n${commentList}\n\n` +
-					`Review the full PR using your azure-devops MCP tools, then address each comment appropriately. ` +
-					`Post reply comments on the PR where warranted, then summarize what you did.`;
+				const prompt = `ADO service hook: ${events.length} comment(s) on PR #${event.prId} ("${event.prTitle}") in ${event.project}/${event.repo}:\n\n${commentList}\n\nReview the full PR using your azure-devops MCP tools, then address each comment appropriately. Post reply comments on the PR where warranted, then summarize what you did.`;
 				const conversationId = `ado-webhook:pr-${event.prId}:${Date.now()}`;
 				try {
-					const response = await runtime.handleMessage("ado-webhook", conversationId, prompt);
+					const adoProject = events[0]?.project;
+					const adoBinding = adoProject && projectRegistry.get(adoProject) ? { projectName: adoProject } : undefined;
+					const response = await runWithProjectBinding("ado-webhook", conversationId, prompt, undefined, adoBinding);
 					if (slackChannel && channelsConfig?.slack?.owner_user_id) {
 						await slackChannel.sendDm(channelsConfig.slack.owner_user_id, response.text);
 					}
@@ -436,7 +474,7 @@ async function main(): Promise<void> {
 			? `User clicked "${params.actionLabel}". Context: ${params.actionPayload}`
 			: `User clicked "${params.actionLabel}". Please follow up accordingly.`;
 
-		await runtime.handleMessage("slack", params.conversationId, followUpText);
+		await runWithProjectBinding("slack", params.conversationId, followUpText);
 	});
 
 	// Onboarding detection
@@ -537,26 +575,36 @@ async function main(): Promise<void> {
 			}
 		}
 
-		const response = await runtime.handleMessage(msg.channelId, msg.conversationId, messageText, (event: RuntimeEvent) => {
-			switch (event.type) {
-				case "init":
-					console.log(`\n[phantom] Session: ${event.sessionId}`);
-					break;
-				case "thinking":
-					statusReactions?.setThinking();
-					break;
-				case "tool_use":
-					statusReactions?.setTool(event.tool);
-					if (progressStream) {
-						const summary = formatToolActivity(event.tool, event.input);
-						progressStream.addToolActivity(event.tool, summary);
-					}
-					break;
-				case "error":
-					statusReactions?.setError();
-					break;
-			}
-		});
+		// Set active session key so the project tool knows which session to bind
+		activeSessionKey = convKey;
+
+		const resolved = resolveProjectForQuery(projectRegistry, evolution, msg.channelId, msg.conversationId);
+
+		const response = await runWithProjectBinding(
+			msg.channelId,
+			msg.conversationId,
+			messageText,
+			(event: RuntimeEvent) => {
+				switch (event.type) {
+					case "init":
+						console.log(`\n[phantom] Session: ${event.sessionId}`);
+						break;
+					case "thinking":
+						statusReactions?.setThinking();
+						break;
+					case "tool_use":
+						statusReactions?.setTool(event.tool);
+						if (progressStream) {
+							const summary = formatToolActivity(event.tool, event.input);
+							progressStream.addToolActivity(event.tool, summary);
+						}
+						break;
+					case "error":
+						statusReactions?.setError();
+						break;
+				}
+			},
+		);
 
 		// Track assistant messages
 		if (response.text) {
@@ -576,7 +624,7 @@ async function main(): Promise<void> {
 		}
 
 		// Deliver the response
-		if (progressStream && progressStream.getMessageId()) {
+		if (progressStream?.getMessageId()) {
 			// Slack: update the progress message with the final response + feedback buttons
 			await progressStream.finish(response.text);
 		} else if (isSlack && slackChannel && slackChannelId && slackThreadTs) {
@@ -597,17 +645,13 @@ async function main(): Promise<void> {
 
 		if (response.cost.totalUsd > 0) {
 			const { cacheReadTokens, cacheCreationTokens, inputTokens, outputTokens } = response.cost;
-			const cacheHitPct =
-				inputTokens > 0 ? Math.round((cacheReadTokens / inputTokens) * 100) : 0;
+			const cacheHitPct = inputTokens > 0 ? Math.round((cacheReadTokens / inputTokens) * 100) : 0;
 			const cacheSuffix =
 				cacheReadTokens > 0 || cacheCreationTokens > 0
 					? ` | cache ${cacheHitPct}% hit (${cacheReadTokens} read / ${cacheCreationTokens} created)`
 					: "";
 			console.log(
-				`[phantom] Cost: $${response.cost.totalUsd.toFixed(4)} | ` +
-					`${inputTokens} in / ${outputTokens} out` +
-					cacheSuffix +
-					` | ${(response.durationMs / 1000).toFixed(1)}s`,
+				`[phantom] Cost: $${response.cost.totalUsd.toFixed(4)} | ${inputTokens} in / ${outputTokens} out${cacheSuffix} | ${(response.durationMs / 1000).toFixed(1)}s`,
 			);
 		}
 
@@ -646,8 +690,8 @@ async function main(): Promise<void> {
 
 			const useLLMConsolidation = evolution?.usesLLMJudges() && evolution.isWithinCostCap();
 			if (useLLMConsolidation) {
-				const evolvedConfig = evolution?.getConfig();
-				const existingFacts = evolvedConfig ? `${evolvedConfig.userProfile}\n${evolvedConfig.domainKnowledge}` : "";
+				const factSource = resolved.mergedEvolvedForQuery ?? evolution?.getConfig() ?? null;
+				const existingFacts = factSource ? `${factSource.userProfile}\n${factSource.domainKnowledge}` : "";
 				consolidateSessionWithLLM(memory, sessionData, existingFacts)
 					.then(({ result, judgeCost }) => {
 						if (judgeCost) {
@@ -696,12 +740,15 @@ async function main(): Promise<void> {
 				started_at: sessionStartedAt,
 				ended_at: new Date().toISOString(),
 				trace_file: response.traceFile,
+				...(resolved.projectEvolutionConfigDir
+					? { project_evolution_config_dir: resolved.projectEvolutionConfigDir }
+					: {}),
 			};
 
 			evolution
 				.afterSession(sessionSummary)
 				.then((result) => {
-					if (result.changes_applied.length > 0) {
+					if (result.changes_applied.length > 0 && !sessionSummary.project_evolution_config_dir) {
 						const updatedConfig = evolution?.getConfig();
 						if (updatedConfig) {
 							runtime.setEvolvedConfig(updatedConfig);
@@ -758,6 +805,7 @@ async function main(): Promise<void> {
 		runtime,
 		slackChannel: slackChannel ?? undefined,
 		ownerUserId: channelsConfig?.slack?.owner_user_id,
+		runWithProjectBinding,
 	});
 
 	// Wire secret save notification: when the user saves credentials via the form,
@@ -771,7 +819,7 @@ async function main(): Promise<void> {
 		const prompt = `The user just saved credentials via the secure form: ${secretNames.join(", ")}. Use phantom_get_secret to retrieve them and continue with the task you were working on.`;
 
 		// Non-blocking: wake the agent, let it decide what to say (Cardinal Rule)
-		runtime.handleMessage("slack", conversationId, prompt).catch((err: unknown) => {
+		runWithProjectBinding("slack", conversationId, prompt).catch((err: unknown) => {
 			const msg = err instanceof Error ? err.message : String(err);
 			console.warn(`[secrets] Failed to wake agent after secret save: ${msg}`);
 		});

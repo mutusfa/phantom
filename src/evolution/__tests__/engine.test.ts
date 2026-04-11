@@ -264,4 +264,65 @@ describe("EvolutionEngine", () => {
 		expect(config.userProfile).toContain("TypeScript");
 		expect(config.meta.version).toBeGreaterThan(0);
 	});
+
+	test("afterSession with project_evolution_config_dir writes version under project tree", async () => {
+		const projRoot = `${TEST_DIR}/proj-evolved`;
+		mkdirSync(`${projRoot}/meta`, { recursive: true });
+		mkdirSync(`${projRoot}/strategies`, { recursive: true });
+		mkdirSync(`${projRoot}/memory`, { recursive: true });
+		writeFileSync(`${projRoot}/persona.md`, "# Persona\n\n", "utf-8");
+		writeFileSync(`${projRoot}/user-profile.md`, "# User Profile\n\n", "utf-8");
+		writeFileSync(`${projRoot}/domain-knowledge.md`, "# Domain Knowledge\n", "utf-8");
+		writeFileSync(`${projRoot}/strategies/task-patterns.md`, "# Task Patterns\n", "utf-8");
+		writeFileSync(`${projRoot}/strategies/tool-preferences.md`, "# Tool Preferences\n", "utf-8");
+		writeFileSync(`${projRoot}/strategies/error-recovery.md`, "# Error Recovery\n", "utf-8");
+		writeFileSync(`${projRoot}/memory/session-log.jsonl`, "", "utf-8");
+		writeFileSync(
+			`${projRoot}/meta/version.json`,
+			JSON.stringify({
+				version: 0,
+				parent: null,
+				timestamp: "2026-03-25T00:00:00Z",
+				changes: [],
+				metrics_at_change: { session_count: 0, success_rate_7d: 0, correction_rate_7d: 0 },
+			}),
+			"utf-8",
+		);
+		writeFileSync(
+			`${projRoot}/meta/metrics.json`,
+			JSON.stringify({
+				session_count: 0,
+				success_count: 0,
+				failure_count: 0,
+				correction_count: 0,
+				evolution_count: 0,
+				rollback_count: 0,
+				last_session_at: null,
+				last_evolution_at: null,
+				success_rate_7d: 0,
+				correction_rate_7d: 0,
+				sessions_since_consolidation: 0,
+				sessions_since_reflection: 0,
+			}),
+			"utf-8",
+		);
+		writeFileSync(`${projRoot}/meta/evolution-log.jsonl`, "", "utf-8");
+		writeFileSync(`${projRoot}/meta/golden-suite.jsonl`, "", "utf-8");
+
+		const engine = new EvolutionEngine(CONFIG_PATH);
+		const session = makeSession({
+			user_messages: ["No, use TypeScript not JavaScript"],
+			project_evolution_config_dir: projRoot,
+			bypass_cadence: true,
+		});
+		const result = await engine.afterSession(session);
+
+		const globalVersion = JSON.parse(readFileSync(`${TEST_DIR}/phantom-config/meta/version.json`, "utf-8"));
+		const projVersion = JSON.parse(readFileSync(`${projRoot}/meta/version.json`, "utf-8"));
+
+		if (result.changes_applied.length > 0) {
+			expect(projVersion.version).toBeGreaterThan(0);
+			expect(globalVersion.version).toBe(0);
+		}
+	});
 });

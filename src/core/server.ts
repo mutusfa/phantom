@@ -22,6 +22,14 @@ type TriggerDeps = {
 	runtime: AgentRuntime;
 	slackChannel?: SlackChannel;
 	ownerUserId?: string;
+	/** When set, used instead of raw runtime.handleMessage so project binding applies. */
+	runWithProjectBinding?: (
+		channelId: string,
+		conversationId: string,
+		task: string,
+		onEvent?: (event: import("../agent/runtime.ts").RuntimeEvent) => void,
+		explicit?: import("../projects/resolve-for-query.ts").ProjectBindingInput,
+	) => Promise<import("../agent/events.ts").AgentResponse>;
 };
 
 let memoryHealthProvider: MemoryHealthProvider | null = null;
@@ -179,8 +187,14 @@ async function handleTrigger(req: Request): Promise<Response> {
 	if (!triggerDeps) {
 		return Response.json({ status: "error", message: "Trigger not configured" }, { status: 503 });
 	}
+	const deps = triggerDeps;
 
-	let body: { task?: string; delivery?: { channel?: string; target?: string }; source?: string };
+	let body: {
+		task?: string;
+		project?: string;
+		delivery?: { channel?: string; target?: string };
+		source?: string;
+	};
 	try {
 		body = (await req.json()) as typeof body;
 	} catch {
@@ -195,19 +209,21 @@ async function handleTrigger(req: Request): Promise<Response> {
 	const source = body.source ?? "http";
 
 	try {
-		const response = await triggerDeps.runtime.handleMessage("trigger", conversationId, body.task);
+		const run = deps.runWithProjectBinding ?? ((ch, conv, t) => deps.runtime.handleMessage(ch, conv, t));
+		const binding = body.project && body.project.length > 0 ? { projectName: body.project } : undefined;
+		const response = await run("trigger", conversationId, body.task, undefined, binding);
 
 		// Deliver via Slack if requested
 		const deliveryChannel = body.delivery?.channel ?? "slack";
 		const deliveryTarget = body.delivery?.target ?? "owner";
 
-		if (deliveryChannel === "slack" && triggerDeps.slackChannel) {
-			if (deliveryTarget === "owner" && triggerDeps.ownerUserId) {
-				await triggerDeps.slackChannel.sendDm(triggerDeps.ownerUserId, response.text);
+		if (deliveryChannel === "slack" && deps.slackChannel) {
+			if (deliveryTarget === "owner" && deps.ownerUserId) {
+				await deps.slackChannel.sendDm(deps.ownerUserId, response.text);
 			} else if (deliveryTarget.startsWith("C")) {
-				await triggerDeps.slackChannel.postToChannel(deliveryTarget, response.text);
+				await deps.slackChannel.postToChannel(deliveryTarget, response.text);
 			} else if (deliveryTarget.startsWith("U")) {
-				await triggerDeps.slackChannel.sendDm(deliveryTarget, response.text);
+				await deps.slackChannel.sendDm(deliveryTarget, response.text);
 			}
 		}
 
