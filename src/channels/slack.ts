@@ -408,7 +408,9 @@ export class SlackChannel implements Channel {
 			if (!this.messageHandler) return;
 
 			const msg = event as unknown as Record<string, unknown>;
-			if (msg.subtype) return;
+			// Allow file_share subtype through - Slack sends file-only DMs with this subtype.
+			// Other subtypes (message_changed, bot_message, etc.) are still filtered.
+			if (msg.subtype && msg.subtype !== "file_share") return;
 			if (msg.bot_id) return;
 
 			const userId = msg.user as string | undefined;
