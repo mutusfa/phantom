@@ -290,7 +290,7 @@ export class AgentRuntime {
 						}
 						const content = extractTextFromMessage(message.message);
 						if (content) {
-							resultText = content;
+							resultText = resultText ? `${resultText}\n\n${content}` : content;
 							onEvent?.({ type: "assistant_message", content });
 						}
 						for (const block of message.message.content) {
@@ -310,8 +310,10 @@ export class AgentRuntime {
 							throw new Error(sdkResultErrorText(message) ?? "No conversation found");
 						}
 						cost = extractCost(message as unknown as Parameters<typeof extractCost>[0]);
-						if (message.subtype === "success") resultText = message.result || resultText;
-						break;
+						if (message.subtype === "success") {
+							// Prefer accumulated texts (all turns joined) over message.result which is only the last block.
+							if (!resultText) resultText = message.result;
+						}
 					}
 				}
 			}
