@@ -786,7 +786,7 @@ async function main(): Promise<void> {
 					updateMessage: (msgId, updatedText) => sc.updateMessage(ch, msgId, updatedText),
 				},
 				onFinish: async (messageId, text) => {
-					await sc.updateWithFeedback(ch, messageId, text);
+					await sc.updateWithFeedback(ch, messageId, text, tts);
 				},
 				onError: (err) => {
 					const errMsg = err instanceof Error ? err.message : String(err);

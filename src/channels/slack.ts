@@ -1,5 +1,5 @@
 import { App, type LogLevel, SocketModeReceiver } from "@slack/bolt";
-import type { SlackBlock } from "./feedback.ts";
+import { type SlackBlock, buildFeedbackBlocks } from "./feedback.ts";
 import { registerSlackActions } from "./slack-actions.ts";
 import {
 	type EgressContext,
@@ -10,9 +10,9 @@ import {
 	egressSend,
 	egressSendDm,
 	egressUpdateMessage,
-	egressUpdateWithFeedback,
 } from "./slack-egress.ts";
 import { NoopSlackMetrics, type SlackMetricsEmitter } from "./slack-metrics.ts";
+import { splitMessage, toSlackMarkdown } from "./slack-formatter.ts";
 import type { Channel, ChannelCapabilities, InboundMessage, OutboundMessage, SentMessage } from "./types.ts";
 
 export type SlackChannelConfig = {
@@ -379,9 +379,54 @@ export class SlackChannel implements Channel {
 		return egressUpdateMessage(this.egressContext(), channel, ts, text, blocks);
 	}
 
-	/** Update a message with text + feedback buttons appended */
-	async updateWithFeedback(channel: string, ts: string, text: string): Promise<void> {
-		return egressUpdateWithFeedback(this.egressContext(), channel, ts, text);
+	/** Update a message with text + feedback buttons appended.
+	 *
+	 * Slack section blocks are limited to 3000 chars. For longer responses, updates the
+	 * progress message with the first chunk and posts overflow as new thread replies.
+	 * If the update fails entirely, falls back to posting as new thread messages.
+	 * threadTs is the original user message TS; required to post overflow into the right thread.
+	 */
+	async updateWithFeedback(channel: string, ts: string, text: string, threadTs?: string): Promise<void> {
+		// Slack section block text is capped at 3000 chars; use 2990 for safety
+		const BLOCK_CHAR_LIMIT = 2990;
+		const formattedText = toSlackMarkdown(text);
+		const chunks = splitMessage(formattedText, BLOCK_CHAR_LIMIT);
+		const firstChunk = chunks[0];
+		const feedbackBlocks = buildFeedbackBlocks(ts);
+		const blocks: SlackBlock[] = [{ type: "section", text: { type: "mrkdwn", text: firstChunk } }, ...feedbackBlocks];
+		const replyThreadTs = threadTs ?? ts;
+
+		let updateSucceeded = false;
+		try {
+			const updateArgs: Record<string, unknown> = { channel, ts, text: firstChunk, blocks };
+			await this.app.client.chat.update(updateArgs as unknown as Parameters<typeof this.app.client.chat.update>[0]);
+			updateSucceeded = true;
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			console.warn(`[slack] Failed to update message with feedback: ${msg}`);
+		}
+
+		if (updateSucceeded && chunks.length > 1) {
+			// Post overflow chunks as new thread replies
+			for (const chunk of chunks.slice(1)) {
+				try {
+					await this.app.client.chat.postMessage({ channel, thread_ts: replyThreadTs, text: chunk });
+				} catch (err: unknown) {
+					const msg = err instanceof Error ? err.message : String(err);
+					console.warn(`[slack] Failed to post overflow chunk: ${msg}`);
+				}
+			}
+		} else if (!updateSucceeded) {
+			// Fallback: post full response as new thread messages
+			for (const chunk of chunks) {
+				try {
+					await this.app.client.chat.postMessage({ channel, thread_ts: replyThreadTs, text: chunk });
+				} catch (err: unknown) {
+					const msg = err instanceof Error ? err.message : String(err);
+					console.warn(`[slack] Fallback post also failed: ${msg}`);
+				}
+			}
+		}
 	}
 
 	async addReaction(channel: string, messageTs: string, emoji: string): Promise<void> {
