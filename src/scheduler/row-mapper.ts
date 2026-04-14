@@ -12,6 +12,7 @@ export function rowToJob(row: JobRow): ScheduledJob {
 		id: row.id,
 		name: row.name,
 		description: row.description,
+		projectName: row.project_name,
 		enabled: row.enabled === 1,
 		schedule,
 		task: row.task,

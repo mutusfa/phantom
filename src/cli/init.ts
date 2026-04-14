@@ -248,7 +248,17 @@ export async function runInit(args: string[]): Promise<void> {
 	}
 
 	// Create directories
-	for (const dir of ["config", "config/roles", "phantom-config", "phantom-config/strategies", "data"]) {
+	for (const dir of [
+		"config",
+		"config/roles",
+		"phantom-config",
+		"phantom-config/strategies",
+		"data",
+		"data/phantom-config",
+		"data/phantom-config/strategies",
+		"data/phantom-config/meta",
+		"data/phantom-config/memory",
+	]) {
 		if (!existsSync(dir)) {
 			mkdirSync(dir, { recursive: true });
 		}
@@ -273,23 +283,49 @@ export async function runInit(args: string[]): Promise<void> {
 		console.log("  Created .env.local with Slack tokens");
 	}
 
-	// Write initial evolved config files
-	const configFiles: Record<string, string> = {
+	// Write initial evolved config files to phantom-config/ (committed seed files)
+	const seedFiles: Record<string, string> = {
 		"phantom-config/constitution.md": "# Constitution\n\nImmutable principles that govern this agent's behavior.\n",
 		"phantom-config/persona.md": "# Persona\n\nCommunication style and personality traits.\n",
-		"phantom-config/user-profile.md": "# User Profile\n\nPreferences and context about the user.\n",
 		"phantom-config/domain-knowledge.md": "# Domain Knowledge\n\nAccumulated expertise and context.\n",
 		"phantom-config/strategies/task-patterns.md": "# Task Patterns\n\nLearned approaches to common tasks.\n",
 		"phantom-config/strategies/tool-preferences.md": "# Tool Preferences\n\nPreferred tools and workflows.\n",
 		"phantom-config/strategies/error-recovery.md": "# Error Recovery\n\nLearned error handling strategies.\n",
 	};
 
-	for (const [filePath, content] of Object.entries(configFiles)) {
+	for (const [filePath, content] of Object.entries(seedFiles)) {
 		if (!existsSync(filePath)) {
 			writeFileSync(filePath, content);
 		}
 	}
-	console.log("  Created phantom-config/ with initial files");
+
+	// Write runtime evolved config to data/phantom-config/ (gitignored, survives branch switches).
+	// Seeds from phantom-config/ if those files exist, otherwise uses defaults.
+	const seed = (committed: string, fallback: string): string =>
+		existsSync(committed) ? readFileSync(committed, "utf-8") : fallback;
+
+	const dataConfigFiles: Record<string, string> = {
+		"data/phantom-config/constitution.md": seed(
+			"phantom-config/constitution.md",
+			"# Constitution\n\nImmutable principles that govern this agent's behavior.\n",
+		),
+		"data/phantom-config/persona.md": seed(
+			"phantom-config/persona.md",
+			"# Persona\n\nCommunication style and personality traits.\n",
+		),
+		"data/phantom-config/user-profile.md": "# User Profile\n\nPreferences and context about the user.\n",
+		"data/phantom-config/domain-knowledge.md": "# Domain Knowledge\n\nAccumulated expertise and context.\n",
+		"data/phantom-config/strategies/task-patterns.md": "# Task Patterns\n\nLearned approaches to common tasks.\n",
+		"data/phantom-config/strategies/tool-preferences.md": "# Tool Preferences\n\nPreferred tools and workflows.\n",
+		"data/phantom-config/strategies/error-recovery.md": "# Error Recovery\n\nLearned error handling strategies.\n",
+	};
+
+	for (const [filePath, content] of Object.entries(dataConfigFiles)) {
+		if (!existsSync(filePath)) {
+			writeFileSync(filePath, content);
+		}
+	}
+	console.log("  Created data/phantom-config/ with initial files (seeded from phantom-config/)");
 
 	console.log("\nPhantom initialized.\n");
 	console.log("MCP tokens (save these, they will not be shown again):");

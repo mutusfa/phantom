@@ -3,13 +3,17 @@
 // memory-files.js) registers with the shell and is told to mount/unmount
 // on route changes.
 
-(function () {
+(() => {
 	var routes = {};
 	var activeRoute = null;
 	var dirtyCheckers = [];
 
-	function qs(sel) { return document.querySelector(sel); }
-	function qsa(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
+	function qs(sel) {
+		return document.querySelector(sel);
+	}
+	function qsa(sel) {
+		return Array.prototype.slice.call(document.querySelectorAll(sel));
+	}
 
 	// Structural deep equality shared across dashboard tabs. Used in dirty
 	// checks so client-built frontmatter compares equal to server-returned
@@ -60,14 +64,20 @@
 		var bodyHtml = body ? '<p class="dash-toast-body">' + esc(body) + "</p>" : "";
 		el.innerHTML = titleHtml + bodyHtml;
 		container.appendChild(el);
-		setTimeout(function () {
-			el.style.transition = "opacity 200ms ease, transform 200ms ease";
-			el.style.opacity = "0";
-			el.style.transform = "translateY(-6px)";
-		}, kind === "error" ? 5000 : 2800);
-		setTimeout(function () {
-			if (el.parentNode) el.parentNode.removeChild(el);
-		}, kind === "error" ? 5400 : 3100);
+		setTimeout(
+			() => {
+				el.style.transition = "opacity 200ms ease, transform 200ms ease";
+				el.style.opacity = "0";
+				el.style.transform = "translateY(-6px)";
+			},
+			kind === "error" ? 5000 : 2800,
+		);
+		setTimeout(
+			() => {
+				if (el.parentNode) el.parentNode.removeChild(el);
+			},
+			kind === "error" ? 5400 : 3100,
+		);
 	}
 
 	function api(method, url, body) {
@@ -76,12 +86,12 @@
 			init.headers["Content-Type"] = "application/json";
 			init.body = JSON.stringify(body);
 		}
-		return fetch(url, init).then(function (res) {
+		return fetch(url, init).then((res) => {
 			var ct = res.headers.get("Content-Type") || "";
 			var pJson = ct.indexOf("application/json") >= 0 ? res.json() : res.text();
-			return pJson.then(function (parsed) {
+			return pJson.then((parsed) => {
 				if (!res.ok) {
-					var msg = (parsed && parsed.error) || ("HTTP " + res.status);
+					var msg = (parsed && parsed.error) || "HTTP " + res.status;
 					var e = new Error(msg);
 					e.status = res.status;
 					throw e;
@@ -114,13 +124,13 @@
 
 		var actions = document.createElement("div");
 		actions.className = "dash-modal-actions";
-		(options.actions || []).forEach(function (action) {
+		(options.actions || []).forEach((action) => {
 			var btn = document.createElement("button");
 			btn.className = "dash-btn " + (action.className || "dash-btn-ghost");
 			btn.textContent = action.label;
-			btn.addEventListener("click", function () {
+			btn.addEventListener("click", () => {
 				var result = action.onClick ? action.onClick(modal) : null;
-				Promise.resolve(result).then(function (shouldClose) {
+				Promise.resolve(result).then((shouldClose) => {
 					if (shouldClose !== false) close();
 				});
 			});
@@ -134,17 +144,23 @@
 		document.body.appendChild(backdrop);
 
 		var firstInput = modal.querySelector("input, textarea, select, button");
-		if (firstInput) setTimeout(function () { firstInput.focus(); }, 50);
+		if (firstInput)
+			setTimeout(() => {
+				firstInput.focus();
+			}, 50);
 
 		function close() {
 			if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
 			document.removeEventListener("keydown", onKey);
 		}
 		function onKey(e) {
-			if (e.key === "Escape") { e.preventDefault(); close(); }
+			if (e.key === "Escape") {
+				e.preventDefault();
+				close();
+			}
 		}
 		document.addEventListener("keydown", onKey);
-		backdrop.addEventListener("click", function (e) {
+		backdrop.addEventListener("click", (e) => {
 			if (e.target === backdrop) close();
 		});
 
@@ -177,7 +193,7 @@
 	}
 
 	function setActiveSidebar(name) {
-		qsa(".dash-sidebar-item").forEach(function (item) {
+		qsa(".dash-sidebar-item").forEach((item) => {
 			if (item.getAttribute("data-route") === name) {
 				item.setAttribute("aria-current", "page");
 			} else {
@@ -226,19 +242,24 @@
 			},
 		};
 		var meta = labels[name] || { eyebrow: "Soon", title: name, body: "Coming in a later PR." };
-		container.innerHTML = (
+		container.innerHTML =
 			'<div class="dash-soon">' +
-			'<p class="dash-soon-eyebrow">' + esc(meta.eyebrow) + ' &middot; Coming soon</p>' +
-			'<h1 class="dash-soon-title">' + esc(meta.title) + '</h1>' +
-			'<p class="dash-soon-body">' + esc(meta.body) + '</p>' +
+			'<p class="dash-soon-eyebrow">' +
+			esc(meta.eyebrow) +
+			" &middot; Coming soon</p>" +
+			'<h1 class="dash-soon-title">' +
+			esc(meta.title) +
+			"</h1>" +
+			'<p class="dash-soon-body">' +
+			esc(meta.body) +
+			"</p>" +
 			'<a href="#/skills" class="dash-btn dash-btn-ghost">Back to skills</a>' +
-			'</div>'
-		);
+			"</div>";
 		setBreadcrumb(meta.title);
 	}
 
 	function deactivateAllRoutes() {
-		qsa(".dash-route").forEach(function (el) {
+		qsa(".dash-route").forEach((el) => {
 			el.removeAttribute("data-active");
 			el.hidden = true;
 		});
@@ -281,13 +302,13 @@
 				registerDirtyChecker: registerDirtyChecker,
 				deepEqual: deepEqual,
 			});
-			activeRoute = window.location.hash || ("#/" + name);
+			activeRoute = window.location.hash || "#/" + name;
 		} else if (comingSoon.indexOf(name) >= 0) {
 			var soon = qs("#route-soon");
 			if (soon) soon.hidden = false;
 			setActiveSidebar(name);
 			renderSoon(name);
-			activeRoute = window.location.hash || ("#/" + name);
+			activeRoute = window.location.hash || "#/" + name;
 		} else {
 			window.location.hash = "#/skills";
 		}
@@ -305,7 +326,7 @@
 			if (moon) moon.style.display = isDark ? "none" : "inline";
 		}
 		update();
-		toggle.addEventListener("click", function () {
+		toggle.addEventListener("click", () => {
 			var current = document.documentElement.getAttribute("data-theme");
 			var next = current === "phantom-dark" ? "phantom-light" : "phantom-dark";
 			document.documentElement.setAttribute("data-theme", next);
@@ -375,7 +396,7 @@
 		initThemeToggle();
 		openEventStream();
 
-		window.addEventListener("beforeunload", function (e) {
+		window.addEventListener("beforeunload", (e) => {
 			if (anyDirty()) {
 				e.preventDefault();
 				e.returnValue = "";
@@ -384,8 +405,8 @@
 		});
 
 		// Intercept sidebar clicks on Coming Soon items so their hash still updates
-		qsa(".dash-sidebar-item").forEach(function (item) {
-			item.addEventListener("click", function (e) {
+		qsa(".dash-sidebar-item").forEach((item) => {
+			item.addEventListener("click", (e) => {
 				var target = item.getAttribute("href");
 				if (!target) return;
 				e.preventDefault();

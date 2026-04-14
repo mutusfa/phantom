@@ -33,7 +33,7 @@ function getFreeMemoryMb(): number {
 	const text = new TextDecoder().decode(proc.stdout);
 	// Output format: "Mem:  total  used  free  shared  buff/cache  available"
 	const match = text.match(/^Mem:\s+\d+\s+\d+\s+(\d+)/m);
-	return match?.[1] ? parseInt(match[1], 10) : 0;
+	return match?.[1] ? Number.parseInt(match[1], 10) : 0;
 }
 
 export function gatherEnvSnapshot(): EnvSnapshot {

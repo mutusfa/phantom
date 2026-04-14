@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { beforeEach, describe, expect, test } from "bun:test";
 import { SessionStore } from "../../agent/session-store.ts";
 import { runMigrations } from "../../db/migrate.ts";
 import { ProjectRegistry } from "../registry.ts";
@@ -73,6 +73,7 @@ describe("ProjectRegistry", () => {
 		registry.register("alpha");
 		const found = registry.get("alpha");
 		expect(found).not.toBeNull();
+		// biome-ignore lint/style/noNonNullAssertion: checked above
 		expect(found!.name).toBe("alpha");
 	});
 
@@ -84,6 +85,7 @@ describe("ProjectRegistry", () => {
 		const created = registry.register("beta");
 		const found = registry.getById(created.id);
 		expect(found).not.toBeNull();
+		// biome-ignore lint/style/noNonNullAssertion: checked above
 		expect(found!.name).toBe("beta");
 	});
 
@@ -110,6 +112,7 @@ describe("ProjectRegistry", () => {
 		expect(updated.working_dir).toBe("/new/path");
 
 		const fetched = registry.get("updatable");
+		// biome-ignore lint/style/noNonNullAssertion: registry.get returns non-null here
 		expect(fetched!.working_dir).toBe("/new/path");
 	});
 

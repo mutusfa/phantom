@@ -137,11 +137,11 @@ async function checkDatabase(): Promise<CheckResult> {
 }
 
 async function checkEvolvedConfig(): Promise<CheckResult> {
-	if (!existsSync("phantom-config")) {
-		return { name: "Evolved Config", status: "warn", message: "phantom-config/ not found", fix: "phantom init" };
+	if (!existsSync("data/phantom-config")) {
+		return { name: "Evolved Config", status: "warn", message: "data/phantom-config/ not found", fix: "phantom init" };
 	}
 	const requiredFiles = ["constitution.md", "persona.md", "domain-knowledge.md"];
-	const missing = requiredFiles.filter((f) => !existsSync(`phantom-config/${f}`));
+	const missing = requiredFiles.filter((f) => !existsSync(`data/phantom-config/${f}`));
 	if (missing.length > 0) {
 		return { name: "Evolved Config", status: "warn", message: `Missing: ${missing.join(", ")}`, fix: "phantom init" };
 	}

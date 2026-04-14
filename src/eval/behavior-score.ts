@@ -53,7 +53,7 @@ export type BehaviorScore = {
 };
 
 const WEIGHTS = {
-	completion: 0.50,
+	completion: 0.5,
 	intervention: 0.25,
 	cost: 0.125,
 	verbosity: 0.125,
@@ -87,17 +87,14 @@ export function scoreBehavior(m: BehaviorMetrics): BehaviorScore {
 
 	// Metric 2: intervention rate - corrections count double
 	const weightedInterventions =
-		m.totalSessionCount > 0
-			? (m.correctionCount * 2 + m.confirmationCount) / m.totalSessionCount
-			: 0;
+		m.totalSessionCount > 0 ? (m.correctionCount * 2 + m.confirmationCount) / m.totalSessionCount : 0;
 	const interventionScore = Math.max(0, 1 - weightedInterventions / MAX_INTERVENTIONS_PER_SESSION);
 
 	// Metric 3: cost - relative to historical baseline, neutral (0.5) if no history
 	const costScore = m.baselineCostUsd !== null ? ratioScore(m.avgCostUsd, m.baselineCostUsd) : 0.5;
 
 	// Metric 4: verbosity - relative to historical baseline, neutral (0.5) if no history
-	const verbosityScore =
-		m.baselineOutputTokens !== null ? ratioScore(m.avgOutputTokens, m.baselineOutputTokens) : 0.5;
+	const verbosityScore = m.baselineOutputTokens !== null ? ratioScore(m.avgOutputTokens, m.baselineOutputTokens) : 0.5;
 
 	const total =
 		completionScore * WEIGHTS.completion +
@@ -114,9 +111,7 @@ export function scoreBehavior(m: BehaviorMetrics): BehaviorScore {
 	const costBaselinePart =
 		m.baselineCostUsd !== null ? ` vs $${m.baselineCostUsd.toFixed(4)} baseline` : " (no baseline yet)";
 	const verbosityBaselinePart =
-		m.baselineOutputTokens !== null
-			? ` vs ${Math.round(m.baselineOutputTokens)} baseline`
-			: " (no baseline yet)";
+		m.baselineOutputTokens !== null ? ` vs ${Math.round(m.baselineOutputTokens)} baseline` : " (no baseline yet)";
 
 	const breakdown = [
 		`completion  : ${completionRate !== null ? `${(completionRate * 100).toFixed(0)}%` : "unknown"} (${m.thumbsUpCount} 👍 / ${m.labeledSessionCount} labeled) → ${(completionScore * 100).toFixed(0)}/100`,

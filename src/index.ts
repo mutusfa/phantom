@@ -2,7 +2,6 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { configureAgentSdkRuntime } from "./agent/agent-sdk.ts";
 import { createReflectiveToolServer } from "./agent/in-process-reflective-tools.ts";
-import { logger } from "./core/logger.ts";
 import { createInProcessToolServer } from "./agent/in-process-tools.ts";
 import { AgentRuntime } from "./agent/runtime.ts";
 import type { RuntimeEvent } from "./agent/runtime.ts";

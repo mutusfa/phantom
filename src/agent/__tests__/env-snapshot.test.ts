@@ -11,6 +11,7 @@ const baseConfig: PhantomConfig = {
 	effort: "max",
 	max_budget_usd: 0,
 	timeout_minutes: 240,
+	provider: { type: "anthropic" },
 };
 
 function makeSnapshot(overrides: Partial<EnvSnapshot> = {}): EnvSnapshot {
@@ -65,15 +66,7 @@ describe("formatEnvSnapshot", () => {
 describe("assemblePrompt with envSnapshot", () => {
 	test("includes env snapshot when provided", () => {
 		const snapshot = formatEnvSnapshot(makeSnapshot());
-		const prompt = assemblePrompt(
-			baseConfig,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			snapshot,
-		);
+		const prompt = assemblePrompt(baseConfig, undefined, undefined, undefined, undefined, undefined, snapshot);
 		expect(prompt).toContain("Current Session State");
 		expect(prompt).toContain("bun, git, docker, gh");
 	});
@@ -86,15 +79,7 @@ describe("assemblePrompt with envSnapshot", () => {
 
 	test("env snapshot appears after environment section and before security section", () => {
 		const snapshot = formatEnvSnapshot(makeSnapshot());
-		const prompt = assemblePrompt(
-			baseConfig,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			snapshot,
-		);
+		const prompt = assemblePrompt(baseConfig, undefined, undefined, undefined, undefined, undefined, snapshot);
 		const envPos = prompt.indexOf("Your Environment");
 		const snapshotPos = prompt.indexOf("Current Session State");
 		const securityPos = prompt.indexOf("Security Boundaries");

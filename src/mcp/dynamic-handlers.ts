@@ -107,7 +107,7 @@ async function executeScriptHandler(path: string, input: Record<string, unknown>
 				markerFound = true;
 				const afterMarker = tailBuffer.slice(markerIdx + marker.length).trim();
 				const exitMatch = afterMarker.match(/^(\d+)/);
-				markerExitCode = exitMatch?.[1] ? parseInt(exitMatch[1], 10) : 0;
+				markerExitCode = exitMatch?.[1] ? Number.parseInt(exitMatch[1], 10) : 0;
 				break;
 			}
 			if (tailBuffer.length > marker.length * 4) {
@@ -203,7 +203,7 @@ async function executeShellHandler(command: string, input: Record<string, unknow
 				markerFound = true;
 				const afterMarker = tailBuffer.slice(markerIdx + marker.length).trim();
 				const exitMatch = afterMarker.match(/^(\d+)/);
-				markerExitCode = exitMatch?.[1] ? parseInt(exitMatch[1], 10) : 0;
+				markerExitCode = exitMatch?.[1] ? Number.parseInt(exitMatch[1], 10) : 0;
 				break;
 			}
 			// Keep tail buffer bounded - only need enough chars to span a split marker.

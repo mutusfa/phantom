@@ -20,7 +20,7 @@ import { type BehaviorMetrics, scoreBehavior } from "../src/eval/behavior-score.
 
 const args = process.argv.slice(2);
 const daysIdx = args.indexOf("--days");
-const days = daysIdx >= 0 && args[daysIdx + 1] ? parseInt(args[daysIdx + 1] as string, 10) : 30;
+const days = daysIdx >= 0 && args[daysIdx + 1] ? Number.parseInt(args[daysIdx + 1] as string, 10) : 30;
 // Baseline window: the period before the current window (same length, up to 3x)
 const baselineDays = days * 3;
 
@@ -76,18 +76,14 @@ const baselineRow = db
 let feedback: FeedbackRow[] = [];
 try {
 	feedback = db
-		.query<FeedbackRow, [string]>(
-			`SELECT session_key, type FROM session_feedback WHERE created_at >= ?`,
-		)
+		.query<FeedbackRow, [string]>(`SELECT session_key, type FROM session_feedback WHERE created_at >= ?`)
 		.all(since);
 } catch {
 	// Table not yet migrated - treat as no feedback data
 }
 
 const modelRows = db
-	.query<ModelRow, [string]>(
-		`SELECT model, COUNT(*) as count FROM cost_events WHERE created_at >= ? GROUP BY model`,
-	)
+	.query<ModelRow, [string]>(`SELECT model, COUNT(*) as count FROM cost_events WHERE created_at >= ? GROUP BY model`)
 	.all(since);
 
 const modelDistribution: Record<string, number> = {};

@@ -12,7 +12,15 @@ export class CostTracker {
 		this.db.run(
 			`INSERT INTO cost_events (session_key, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, model)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			[sessionKey, cost.totalUsd, cost.inputTokens, cost.outputTokens, cost.cacheReadTokens, cost.cacheCreationTokens, model],
+			[
+				sessionKey,
+				cost.totalUsd,
+				cost.inputTokens,
+				cost.outputTokens,
+				cost.cacheReadTokens,
+				cost.cacheCreationTokens,
+				model,
+			],
 		);
 
 		this.db.run(
