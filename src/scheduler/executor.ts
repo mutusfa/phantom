@@ -83,6 +83,11 @@ export async function executeJob(job: ScheduledJob, ctx: ExecutorContext): Promi
 		ctx.notifyOwner(
 			`Scheduled task "${job.name}" has failed ${MAX_CONSECUTIVE_ERRORS} times in a row and has been disabled. Last error: ${errorMsg}`,
 		);
+	} else if (newConsecErrors === 1) {
+		// Notify immediately on first failure so the operator knows something is
+		// wrong without waiting for the job to exhaust all retries. Subsequent
+		// errors back off silently; the final disable notification fires above.
+		ctx.notifyOwner(`Scheduled task "${job.name}" failed (will retry with backoff): ${errorMsg}`);
 	} else if (job.schedule.kind === "at" && newConsecErrors >= 3) {
 		newStatus = "failed";
 	} else {
@@ -118,31 +123,45 @@ export async function executeJob(job: ScheduledJob, ctx: ExecutorContext): Promi
 		throw new Error(`refusing to write invalid status '${newStatus}' for job ${job.id}`);
 	}
 
-	ctx.db.run(
-		`UPDATE scheduled_jobs SET
-			last_run_at = ?,
-			last_run_status = ?,
-			last_run_duration_ms = ?,
-			last_run_error = ?,
-			last_delivery_status = COALESCE(?, last_delivery_status),
-			next_run_at = ?,
-			run_count = run_count + 1,
-			consecutive_errors = ?,
-			status = ?,
-			updated_at = datetime('now')
-		WHERE id = ?`,
-		[
-			new Date(startMs).toISOString(),
-			runStatus,
-			durationMs,
-			errorMsg,
-			deliveryStatus,
-			nextRunAt,
-			newConsecErrors,
-			newStatus,
-			job.id,
-		],
-	);
+	try {
+		ctx.db.run(
+			`UPDATE scheduled_jobs SET
+				last_run_at = ?,
+				last_run_status = ?,
+				last_run_duration_ms = ?,
+				last_run_error = ?,
+				last_delivery_status = COALESCE(?, last_delivery_status),
+				next_run_at = ?,
+				run_count = run_count + 1,
+				consecutive_errors = ?,
+				status = ?,
+				updated_at = datetime('now')
+			WHERE id = ?`,
+			[
+				new Date(startMs).toISOString(),
+				runStatus,
+				durationMs,
+				errorMsg,
+				deliveryStatus,
+				nextRunAt,
+				newConsecErrors,
+				newStatus,
+				job.id,
+			],
+		);
+	} catch (dbErr: unknown) {
+		// If the row update itself fails (e.g. a missing column from a schema
+		// migration that didn't apply), fall back to a minimal update that only
+		// advances next_run_at so the scheduler does not tight-loop, then
+		// re-throw so the caller logs the error. The minimal UPDATE uses only
+		// columns that have existed since the initial schema.
+		const dbMsg = dbErr instanceof Error ? dbErr.message : String(dbErr);
+		console.error(`[scheduler] DB update failed for job ${job.id} (${job.name}): ${dbMsg} - applying minimal backoff`);
+		const backoffNext = computeBackoffNextRun(job.consecutiveErrors + 1).toISOString();
+		ctx.db.run("UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?", [backoffNext, job.id]);
+		ctx.notifyOwner(`Scheduled task "${job.name}" DB update failed (schema mismatch?): ${dbMsg}`);
+		throw dbErr;
+	}
 
 	if (newStatus === "completed" && job.deleteAfterRun) {
 		ctx.db.run("DELETE FROM scheduled_jobs WHERE id = ?", [job.id]);
