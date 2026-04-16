@@ -42,7 +42,6 @@ export class EvolutionEngine {
 	private config: EvolutionConfig;
 	private reflectionEnabled: boolean;
 	private runtime: AgentRuntime | null;
-	private toolRegistry?: ToolRegistryAdapter;
 
 	// Phase 0 belt-and-suspenders mutex. The Phase 2 cadence serialises
 	// drains through its own `inFlight` guard so this is redundant on the
@@ -347,6 +346,30 @@ export class EvolutionEngine {
 			meta: {
 				version: version.version,
 				metricsSnapshot,
+			},
+		};
+	}
+
+	/**
+	 * Read evolved config from a project-specific config directory.
+	 * Returns an empty EvolvedConfig shape if the directory has no files.
+	 * Constitution is never read from project dirs (immutable global principle).
+	 */
+	getProjectConfig(projectConfigDir: string): EvolvedConfig {
+		const dir = projectConfigDir;
+		return {
+			constitution: "",
+			persona: readConfigFile(join(dir, "persona.md")),
+			userProfile: readConfigFile(join(dir, "user-profile.md")),
+			domainKnowledge: readConfigFile(join(dir, "domain-knowledge.md")),
+			strategies: {
+				taskPatterns: readConfigFile(join(dir, "strategies/task-patterns.md")),
+				toolPreferences: readConfigFile(join(dir, "strategies/tool-preferences.md")),
+				errorRecovery: readConfigFile(join(dir, "strategies/error-recovery.md")),
+			},
+			meta: {
+				version: 0,
+				metricsSnapshot: { session_count: 0, success_rate_7d: 0 },
 			},
 		};
 	}

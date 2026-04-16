@@ -33,6 +33,14 @@ function setupEnv(): EvolutionConfig {
 			metrics_file: `${TEST_DIR}/phantom-config/meta/metrics.json`,
 			evolution_log: `${TEST_DIR}/phantom-config/meta/evolution-log.jsonl`,
 			session_log: `${TEST_DIR}/phantom-config/memory/session-log.jsonl`,
+			source_dir: "src",
+			skills_dir: ".claude/skills",
+		},
+		capabilities: {
+			allow_config_changes: true,
+			allow_source_changes: false,
+			allow_skill_creation: false,
+			allow_tool_registration: false,
 		},
 	};
 }

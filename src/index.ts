@@ -306,17 +306,6 @@ async function main(): Promise<void> {
 		// Wire dynamic tool management tools into the agent as in-process MCP tools
 		const registry = mcpServer.getDynamicToolRegistry();
 
-		// Give the evolution engine access to the tool registry so it can register/unregister
-		// dynamic MCP tools as an evolution outcome (when allow_tool_registration is enabled).
-		if (evolution) {
-			evolution.setToolRegistry({
-				register: (params) => {
-					registry.register({ ...params, input_schema: params.input_schema ?? {} });
-				},
-				unregister: (name) => registry.unregister(name),
-			});
-		}
-
 		// Wire scheduler into the agent (Slack channel set later after channel init)
 		scheduler = new Scheduler({ db, runtime, runWithProjectBinding });
 		setSchedulerHealthProvider(() => scheduler?.getHealthSummary() ?? null);

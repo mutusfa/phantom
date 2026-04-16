@@ -19,7 +19,6 @@ export function deriveProjectEvolutionConfig(
 			version_file: join(root, "meta", "version.json"),
 			metrics_file: join(root, "meta", "metrics.json"),
 			evolution_log: join(root, "meta", "evolution-log.jsonl"),
-			golden_suite: join(root, "meta", "golden-suite.jsonl"),
 			session_log: join(root, "memory", "session-log.jsonl"),
 		},
 	};

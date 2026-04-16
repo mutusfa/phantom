@@ -96,6 +96,15 @@ describe("loadEvolutionConfig", () => {
 });
 
 
+const emptyConfig: EvolvedConfig = {
+	constitution: "",
+	persona: "",
+	userProfile: "",
+	domainKnowledge: "",
+	strategies: { taskPatterns: "", toolPreferences: "", errorRecovery: "" },
+	meta: { version: 0, metricsSnapshot: { session_count: 0, success_rate_7d: 0 } },
+};
+
 describe("mergeEvolvedConfigs", () => {
 	test("returns global config when project config is empty", () => {
 		const global: EvolvedConfig = { ...emptyConfig, domainKnowledge: "Global knowledge" };
@@ -135,11 +144,11 @@ describe("mergeEvolvedConfigs", () => {
 	test("uses global meta, not project meta", () => {
 		const global: EvolvedConfig = {
 			...emptyConfig,
-			meta: { version: 5, metricsSnapshot: { session_count: 10, success_rate_7d: 0.9, correction_rate_7d: 0.1 } },
+			meta: { version: 5, metricsSnapshot: { session_count: 10, success_rate_7d: 0.9 } },
 		};
 		const project: EvolvedConfig = {
 			...emptyConfig,
-			meta: { version: 99, metricsSnapshot: { session_count: 0, success_rate_7d: 0, correction_rate_7d: 0 } },
+			meta: { version: 99, metricsSnapshot: { session_count: 0, success_rate_7d: 0 } },
 		};
 		const merged = mergeEvolvedConfigs(global, project);
 		expect(merged.meta.version).toBe(5);

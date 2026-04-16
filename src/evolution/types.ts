@@ -16,7 +16,7 @@ export type VersionChange = {
 	summary: string;
 	rationale: string;
 	session_ids: string[];
-	domain?: DeltaDomain;
+	domain?: string;
 };
 
 export type EvolutionVersion = {

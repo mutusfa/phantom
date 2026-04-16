@@ -17,6 +17,14 @@ function emptyConfig(): EvolutionConfig {
 			metrics_file: "/tmp/inv-edge/meta/metrics.json",
 			evolution_log: "/tmp/inv-edge/meta/evolution-log.jsonl",
 			session_log: "/tmp/inv-edge/memory/session-log.jsonl",
+			source_dir: "src",
+			skills_dir: ".claude/skills",
+		},
+		capabilities: {
+			allow_config_changes: true,
+			allow_source_changes: false,
+			allow_skill_creation: false,
+			allow_tool_registration: false,
 		},
 	};
 }

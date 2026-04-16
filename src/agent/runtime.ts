@@ -303,6 +303,7 @@ export class AgentRuntime {
 									input: toolBlock.input,
 								});
 								traceWriter.logToolUse(toolBlock.name, toolBlock.input ?? {});
+							}
 						}
 						break;
 					}
