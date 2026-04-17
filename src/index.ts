@@ -946,28 +946,41 @@ async function main(): Promise<void> {
 
 		// Evolution pipeline (non-blocking)
 		if (evolution) {
-			const sessionSummary: SessionSummary = {
-				session_id: response.sessionId,
-				session_key: convKey,
-				user_id: msg.senderId,
-				user_messages: existing.user,
-				assistant_messages: existing.assistant,
-				tools_used: [],
-				files_tracked: trackedFiles,
-				outcome: response.text.startsWith("Error:") ? "failure" : "success",
-				cost_usd: response.cost.totalUsd,
-				started_at: sessionStartedAt,
-				ended_at: new Date().toISOString(),
-				trace_file: response.traceFile,
-				...(resolved.projectEvolutionConfigDir
-					? { project_evolution_config_dir: resolved.projectEvolutionConfigDir }
-					: {}),
-			};
+			(async () => {
+				// For Slack sessions, fetch the full thread so evolution sees the complete
+				// conversation history, not just the in-memory segment since last restart.
+				let userMessages = existing.user;
+				let assistantMessages = existing.assistant;
+				if (isSlack && slackChannel && slackChannelId && slackThreadTs) {
+					const full = await slackChannel.fetchFullThread(slackChannelId, slackThreadTs);
+					if (full.userMessages.length >= userMessages.length) {
+						userMessages = full.userMessages;
+						assistantMessages = full.assistantMessages;
+					}
+				}
 
-				evolution
-				.enqueueIfWorthy(sessionSummary)
+				const sessionSummary: SessionSummary = {
+					session_id: response.sessionId,
+					session_key: convKey,
+					user_id: msg.senderId,
+					user_messages: userMessages,
+					assistant_messages: assistantMessages,
+					tools_used: [],
+					files_tracked: trackedFiles,
+					outcome: response.text.startsWith("Error:") ? "failure" : "success",
+					cost_usd: response.cost.totalUsd,
+					started_at: sessionStartedAt,
+					ended_at: new Date().toISOString(),
+					trace_file: response.traceFile,
+					...(resolved.projectEvolutionConfigDir
+						? { project_evolution_config_dir: resolved.projectEvolutionConfigDir }
+						: {}),
+				};
+
+				return evolution.enqueueIfWorthy(sessionSummary);
+			})()
 				.then((enqResult) => {
-					const applied = enqResult.inlineResult?.changes_applied.length ?? 0;
+					const applied = enqResult?.inlineResult?.changes_applied.length ?? 0;
 					if (applied > 0) {
 						const updatedConfig = evolution?.getConfig();
 						if (updatedConfig) {

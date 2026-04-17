@@ -371,6 +371,42 @@ export class SlackChannel implements Channel {
 		}
 	}
 
+	// Fetches the full thread for evolution context. Returns all user and assistant
+	// messages without truncation so the reflection subprocess sees the whole conversation.
+	async fetchFullThread(
+		channel: string,
+		threadTs: string,
+	): Promise<{ userMessages: string[]; assistantMessages: string[] }> {
+		try {
+			const result = await this.app.client.conversations.replies({
+				channel,
+				ts: threadTs,
+				limit: 1000,
+			});
+			const messages = (result.messages ?? []) as Array<{
+				bot_id?: string;
+				user?: string;
+				text?: string;
+			}>;
+			const userMessages: string[] = [];
+			const assistantMessages: string[] = [];
+			for (const m of messages) {
+				const text = m.text?.trim();
+				if (!text) continue;
+				if (m.bot_id != null || m.user === this.botUserId) {
+					assistantMessages.push(text);
+				} else {
+					userMessages.push(text);
+				}
+			}
+			return { userMessages, assistantMessages };
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			console.warn(`[slack] Failed to fetch full thread: ${msg}`);
+			return { userMessages: [], assistantMessages: [] };
+		}
+	}
+
 	async postThinking(channel: string, threadTs: string): Promise<string | null> {
 		return egressPostThinking(this.egressContext(), channel, threadTs);
 	}
