@@ -17,7 +17,22 @@ export function runMigrations(db: Database): void {
 
 	for (let i = 0; i < MIGRATIONS.length; i++) {
 		if (applied.has(i)) continue;
-		db.run(MIGRATIONS[i]);
+		try {
+			db.run(MIGRATIONS[i]);
+		} catch (err: unknown) {
+			// ALTER TABLE ADD COLUMN is idempotent in intent - if the column already
+			// exists (e.g. created directly in a prior schema version), treat the
+			// migration as applied rather than crashing. Any other error is fatal.
+			const isAddColumn = /ALTER\s+TABLE\s+\S+\s+ADD\s+COLUMN/i.test(MIGRATIONS[i]);
+			const isDuplicateColumn =
+				err instanceof Error && err.message.includes("duplicate column name");
+			if (!(isAddColumn && isDuplicateColumn)) {
+				throw err;
+			}
+			console.warn(
+				`[migrate] Migration ${i} skipped: column already exists (${err instanceof Error ? err.message : String(err)})`,
+			);
+		}
 		db.run("INSERT INTO _migrations (index_num) VALUES (?)", [i]);
 	}
 }
