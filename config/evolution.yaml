@@ -17,12 +17,12 @@ reflection:
 
 # Directory paths (relative to project root)
 paths:
-  config_dir: "phantom-config"
-  constitution: "phantom-config/constitution.md"
-  version_file: "phantom-config/meta/version.json"
-  metrics_file: "phantom-config/meta/metrics.json"
-  evolution_log: "phantom-config/meta/evolution-log.jsonl"
-  session_log: "phantom-config/memory/session-log.jsonl"
+  config_dir: "data/phantom-config"
+  constitution: "data/phantom-config/constitution.md"
+  version_file: "data/phantom-config/meta/version.json"
+  metrics_file: "data/phantom-config/meta/metrics.json"
+  evolution_log: "data/phantom-config/meta/evolution-log.jsonl"
+  session_log: "data/phantom-config/memory/session-log.jsonl"
   source_dir: "src"
   skills_dir: ".claude/skills"
 
