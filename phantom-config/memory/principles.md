@@ -1,3 +1,7 @@
 # Principles
 
 Distilled strategic principles from session observations.
+
+- Test iteratively and incrementally: smaller group-specific evals reveal more than broad sweeps (session 1776257294 on llm-receipt-reading showed value of --mapping-group-id filtering)
+- Model switching requires recompilation of tuning artifacts (DSPy instructions), not just config changes
+- Vision-specialized models (like DeepSeek OCR) respond better to minimal prompts than complex instructions; instruction tuning may be ineffective for vision-heavy tasks

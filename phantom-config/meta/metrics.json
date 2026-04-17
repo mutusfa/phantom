@@ -1,13 +1,65 @@
 {
-  "session_count": 0,
-  "success_count": 0,
+  "session_count": 12,
+  "success_count": 12,
   "failure_count": 0,
+  "evolution_count": 1,
+  "last_session_at": "2026-04-17T01:03:11.453Z",
+  "last_evolution_at": "2026-04-17T01:04:18.078Z",
+  "success_rate_7d": 1,
   "correction_count": 0,
-  "evolution_count": 0,
   "rollback_count": 0,
-  "last_session_at": null,
-  "last_evolution_at": null,
-  "success_rate_7d": 0,
   "correction_rate_7d": 0,
-  "sessions_since_consolidation": 0
+  "sessions_since_consolidation": 0,
+  "gate_stats": {
+    "total_decisions": 2,
+    "fired_by_haiku": 0,
+    "skipped_by_haiku": 0,
+    "fired_by_failsafe": 2,
+    "haiku_cost_usd_total": 0
+  },
+  "reflection_stats": {
+    "drains": 3,
+    "stage_haiku_runs": 3,
+    "stage_sonnet_runs": 0,
+    "stage_opus_runs": 0,
+    "escalation_haiku_to_sonnet": 0,
+    "escalation_sonnet_to_opus": 0,
+    "escalation_cap_hit": 0,
+    "status_ok": 1,
+    "status_skip": 1,
+    "status_escalate_cap": 0,
+    "sigkill_before_write": 0,
+    "sigkill_mid_write": 0,
+    "timeout_haiku": 1,
+    "timeout_sonnet": 0,
+    "timeout_opus": 0,
+    "invariant_failed_hard": 0,
+    "invariant_warned_soft": 0,
+    "sentinel_parse_fail": 0,
+    "total_cost_usd": 0.11162205,
+    "compactions_performed": 0,
+    "files_touched": {
+      "user-profile.md": 1,
+      "memory/corrections.md": 1,
+      "memory/principles.md": 1,
+      "strategies/task-patterns.md": 1,
+      "strategies/tool-preferences.md": 1,
+      "domain-knowledge.md": 1
+    }
+  },
+  "queue_stats": {
+    "cron_fires_total": 0,
+    "demand_fires_total": 0,
+    "manual_fires_total": 3,
+    "mutex_skips_total": 0,
+    "batch_size_total": 12,
+    "avg_depth_at_drain": 4,
+    "batch_duration_ms_p50": 60294,
+    "batch_duration_ms_p95": 66627,
+    "last_durations": [
+      19481,
+      60294,
+      66627
+    ]
+  }
 }
