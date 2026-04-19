@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { COST_CHANNEL_AUX_JUDGE } from "../agent/cost-source.ts";
 import type { AgentRuntime } from "../agent/runtime.ts";
 import type { ChatSessionStore } from "./session-store.ts";
 
@@ -19,6 +20,7 @@ export async function autoRenameSession(
 			userMessage: `User: ${userMessage}\n\nAssistant: ${assistantMessage}`,
 			schema: titleSchema,
 			omitPreset: true,
+			costAttribution: { channelId: COST_CHANNEL_AUX_JUDGE, conversationId: `chat-rename:${sessionId}` },
 		});
 
 		const title = result.data.title.trim();

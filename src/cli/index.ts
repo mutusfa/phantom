@@ -4,6 +4,7 @@ const COMMANDS: Record<string, string> = {
 	doctor: "Check system health and diagnose issues",
 	token: "Manage MCP authentication tokens",
 	status: "Show quick status of the running Phantom",
+	"cost-breakdown": "Aggregate cost_events by source over a time window",
 };
 
 function printHelp(): void {
@@ -60,6 +61,11 @@ export async function runCli(argv: string[]): Promise<void> {
 		case "status": {
 			const { runStatus } = await import("./status.ts");
 			await runStatus(commandArgs);
+			break;
+		}
+		case "cost-breakdown": {
+			const { runCostBreakdown } = await import("./cost-breakdown.ts");
+			await runCostBreakdown(commandArgs);
 			break;
 		}
 		default:

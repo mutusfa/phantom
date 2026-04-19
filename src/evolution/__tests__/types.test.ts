@@ -86,6 +86,12 @@ describe("Phase 3 evolution types are structurally consistent", () => {
 			invariantHardFailures: [],
 			invariantSoftWarnings: [],
 			costUsd: 0.001,
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheCreationTokens: 0,
+			loopAssistantTurns: 0,
+			loopUniqueReadPaths: 0,
 			durationMs: 5,
 			error: null,
 			incrementRetryOnFailure: false,
@@ -105,6 +111,7 @@ describe("Phase 3 evolution types are structurally consistent", () => {
 			"escalation_cap_hit",
 			"status_ok",
 			"status_skip",
+			"status_escalate_cap",
 			"sigkill_before_write",
 			"sigkill_mid_write",
 			"timeout_haiku",
@@ -116,6 +123,8 @@ describe("Phase 3 evolution types are structurally consistent", () => {
 			"total_cost_usd",
 			"compactions_performed",
 			"files_touched",
+			"loop_assistant_turns_total",
+			"loop_unique_read_paths_total",
 		];
 		// If any key disappears from the type this line fails compilation.
 		expect(keys.length).toBeGreaterThan(15);

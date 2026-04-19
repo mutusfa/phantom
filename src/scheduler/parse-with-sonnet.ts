@@ -13,6 +13,7 @@
 // operator can fall back to manual entry without ceremony.
 
 import { z as zv4 } from "zod/v4";
+import { COST_CHANNEL_AUX_JUDGE } from "../agent/cost-source.ts";
 import type { AgentRuntime } from "../agent/runtime.ts";
 import { type JobCreateInputParsed, JobCreateInputSchema } from "./tool-schema.ts";
 
@@ -94,6 +95,10 @@ export async function parseJobDescription(description: string, deps: ParseDeps =
 			model: deps.model ?? DEFAULT_MODEL,
 			maxTokens: 1024,
 			omitPreset: true,
+			costAttribution: {
+				channelId: COST_CHANNEL_AUX_JUDGE,
+				conversationId: `scheduler-parse:${Date.now().toString(36)}`,
+			},
 		});
 		// Re-validate through the canonical v3 schema. Shared with the MCP
 		// tool and the create endpoint so a proposal that would fail at

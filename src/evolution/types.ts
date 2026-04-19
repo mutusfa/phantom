@@ -27,6 +27,13 @@ export type EvolutionVersion = {
 	metrics_at_change: MetricsSnapshot;
 };
 
+export type MainAgentLoopStats = {
+	completed_turns: number;
+	assistant_turns_sum: number;
+	unique_read_paths_sum: number;
+	tool_calls_sum: number;
+};
+
 export type EvolutionMetrics = {
 	session_count: number;
 	success_count: number;
@@ -35,6 +42,7 @@ export type EvolutionMetrics = {
 	last_session_at: string | null;
 	last_evolution_at: string | null;
 	success_rate_7d: number;
+	main_agent_loop_stats?: MainAgentLoopStats;
 };
 
 export type ObservationType = "correction" | "preference" | "error" | "success" | "tool_pattern" | "domain_fact";
@@ -173,6 +181,10 @@ export type ReflectionStats = {
 	total_cost_usd: number;
 	compactions_performed: number;
 	files_touched: Record<string, number>;
+	/** Sum of assistant-message turns across all reflection SDK spawns in a drain. */
+	loop_assistant_turns_total: number;
+	/** Sum of deduped Read tool paths per drain (cardinality summed per drain, not union across drains). */
+	loop_unique_read_paths_total: number;
 };
 
 /**
@@ -190,6 +202,14 @@ export type ReflectionSubprocessResult = {
 	invariantHardFailures: InvariantFailure[];
 	invariantSoftWarnings: InvariantFailure[];
 	costUsd: number;
+	/** Aggregated usage tokens across every SDK spawn in this drain (Haiku plus any escalations). */
+	inputTokens: number;
+	outputTokens: number;
+	cacheReadTokens: number;
+	cacheCreationTokens: number;
+	/** Loop-shape totals for this drain (all tiers combined). */
+	loopAssistantTurns: number;
+	loopUniqueReadPaths: number;
 	durationMs: number;
 	error: string | null;
 	/**

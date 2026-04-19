@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { COST_CHANNEL_EVOLUTION_GATE } from "../agent/cost-source.ts";
 import { JudgeSubprocessError } from "../agent/judge-query.ts";
 import type { AgentRuntime } from "../agent/runtime.ts";
 import type { EvolutionConfig } from "./config.ts";
@@ -94,6 +95,7 @@ export async function decideGate(session: SessionSummary, runtime: AgentRuntime 
 			schema: GateJudgeResult,
 			model: JUDGE_MODEL_HAIKU,
 			maxTokens: 200,
+			costAttribution: { channelId: COST_CHANNEL_EVOLUTION_GATE, conversationId: session.session_id },
 			// The gate is a pure pass/skip evaluation. It never reads files,
 			// runs commands, or calls tools. Skipping the `claude_code` preset
 			// drops the per-call input token count from thousands to a few

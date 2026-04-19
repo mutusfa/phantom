@@ -13,6 +13,12 @@ import type { CostTracker } from "./cost-tracker.ts";
 import { type AgentCost, type AgentResponse, emptyCost } from "./events.ts";
 import { createDangerousCommandBlocker, createFileTracker } from "./hooks.ts";
 import type { AgentMcpServerFactory } from "./mcp-server-factory.ts";
+import {
+	type MainAgentLoopPayload,
+	absorbAssistantToolPattern,
+	applyAssistantLoopDelta,
+	emptyLoopShapeMetrics,
+} from "./loop-shape.ts";
 import { extractTextFromMessageParam } from "./message-param-utils.ts";
 import { extractCost, extractTextFromMessage } from "./message-utils.ts";
 import { createMurphContextTransform } from "./murph-context.ts";
@@ -31,6 +37,7 @@ export type ChatQueryDeps = {
 	roleTemplate: RoleTemplate | null;
 	onboardingPrompt: string | null;
 	mcpServerFactories: Record<string, AgentMcpServerFactory> | null;
+	onMainAgentLoop?: (payload: MainAgentLoopPayload) => void;
 };
 
 type SessionContextProvider = () => string | undefined;
@@ -85,6 +92,7 @@ export async function executeChatQuery(
 
 	const commandBlocker = createDangerousCommandBlocker();
 	const fileTracker = createFileTracker();
+	const loopMetrics = emptyLoopShapeMetrics();
 	const controller = new AbortController();
 	const timeoutMs = (deps.config.timeout_minutes ?? 240) * 60 * 1000;
 	const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -160,6 +168,10 @@ export async function executeChatQuery(
 					break;
 				}
 				case "assistant": {
+					const delta = absorbAssistantToolPattern(
+						msg as { message?: { content?: ReadonlyArray<{ type: string; name?: string; input?: unknown }> } },
+					);
+					applyAssistantLoopDelta(loopMetrics, delta);
 					const content = extractTextFromMessage(
 						(msg as { message: { content: ReadonlyArray<{ type: string; text?: string }> } }).message,
 					);
@@ -200,5 +212,20 @@ export async function executeChatQuery(
 	deps.costTracker.record(sessionKey, cost, queryModel);
 	deps.sessionStore.touch(sessionKey);
 
-	return { text: resultText, sessionId: sdkSessionId, cost, durationMs: Date.now() - startTime };
+	const durationMs = Date.now() - startTime;
+	const loopPayload: MainAgentLoopPayload = {
+		sessionKey,
+		channelId,
+		conversationId,
+		assistantTurns: loopMetrics.assistantTurns,
+		uniqueReadPaths: loopMetrics.uniqueReadPaths.size,
+		toolCalls: loopMetrics.toolCalls,
+		costUsd: cost.totalUsd,
+		model: deps.config.model,
+		durationMs,
+	};
+	deps.onMainAgentLoop?.(loopPayload);
+	console.log(JSON.stringify({ kind: "main_agent_loop", ...loopPayload }));
+
+	return { text: resultText, sessionId: sdkSessionId, cost, durationMs };
 }

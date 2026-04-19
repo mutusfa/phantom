@@ -46,9 +46,10 @@ import { runMigrations } from "./db/migrate.ts";
 import { EnvKeyFetcher, ResendKeyFetcher } from "./email/key-fetcher.ts";
 import { EmailMetrics } from "./email/metrics.ts";
 import { createEmailToolServer } from "./email/tool.ts";
-import { EvolutionCadence, loadCadenceConfig } from "./evolution/cadence.ts";
 import { detectInterventions } from "./eval/intervention-detector.ts";
+import { EvolutionCadence, loadCadenceConfig } from "./evolution/cadence.ts";
 import { EvolutionEngine } from "./evolution/engine.ts";
+import { recordMainAgentLoopShape } from "./evolution/metrics.ts";
 import { EvolutionQueue } from "./evolution/queue.ts";
 import type { SessionSummary } from "./evolution/types.ts";
 import { PeerHealthMonitor } from "./mcp/peer-health.ts";
@@ -189,6 +190,14 @@ async function main(): Promise<void> {
 		// the boot-time snapshot until the process restarts.
 		engine.setOnConfigApplied(() => {
 			runtime.setEvolvedConfig(engine.getConfig());
+		});
+		runtime.setMainAgentLoopSink((payload) => {
+			recordMainAgentLoopShape(engine.getEvolutionConfig(), {
+				completed_turns: 1,
+				assistant_turns_sum: payload.assistantTurns,
+				unique_read_paths_sum: payload.uniqueReadPaths,
+				tool_calls_sum: payload.toolCalls,
+			});
 		});
 		evolutionCadence.start();
 		console.log(

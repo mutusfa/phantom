@@ -13,8 +13,14 @@ import { formatEnvSnapshot, gatherEnvSnapshot } from "./env-snapshot.ts";
 import { type AgentCost, type AgentResponse, emptyCost } from "./events.ts";
 import { createDangerousCommandBlocker, createFileTracker } from "./hooks.ts";
 import { emitPluginInitSnapshot } from "./init-plugin-snapshot.ts";
-import { type JudgeQueryOptions, type JudgeQueryResult, runJudgeQuery } from "./judge-query.ts";
+import { type JudgeQueryOptions, type JudgeQueryResult, JudgeSubprocessError, runJudgeQuery } from "./judge-query.ts";
 import type { AgentMcpServerFactory } from "./mcp-server-factory.ts";
+import {
+	type MainAgentLoopPayload,
+	absorbAssistantToolPattern,
+	applyAssistantLoopDelta,
+	emptyLoopShapeMetrics,
+} from "./loop-shape.ts";
 import { wrapMessageContent } from "./message-param-utils.ts";
 import { extractCost, extractTextFromMessage } from "./message-utils.ts";
 import { permissionOptionsFromConfig } from "./permission-options.ts";
@@ -31,6 +37,10 @@ export type RuntimeEvent =
 	| { type: "thinking" }
 	| { type: "error"; message: string };
 
+export type JudgeQueryCallOptions<T> = JudgeQueryOptions<T> & {
+	costAttribution?: { channelId: string; conversationId: string };
+};
+
 export class AgentRuntime {
 	private config: PhantomConfig;
 	private sessionStore: SessionStore;
@@ -42,6 +52,7 @@ export class AgentRuntime {
 	private onboardingPrompt: string | null = null;
 	private lastTrackedFiles: string[] = [];
 	private mcpServerFactories: Record<string, AgentMcpServerFactory> | null = null;
+	private mainAgentLoopSink: ((payload: MainAgentLoopPayload) => void) | null = null;
 
 	constructor(config: PhantomConfig, db: Database) {
 		this.config = config;
@@ -69,6 +80,10 @@ export class AgentRuntime {
 		this.mcpServerFactories = factories;
 	}
 
+	setMainAgentLoopSink(sink: ((payload: MainAgentLoopPayload) => void) | null): void {
+		this.mainAgentLoopSink = sink;
+	}
+
 	getLastTrackedFiles(): string[] {
 		return this.lastTrackedFiles;
 	}
@@ -80,8 +95,6 @@ export class AgentRuntime {
 	isSessionBusy(channelId: string, conversationId: string): boolean {
 		return this.activeSessions.has(`${channelId}:${conversationId}`);
 	}
-
-
 
 	async handleMessage(
 		channelId: string,
@@ -133,8 +146,48 @@ export class AgentRuntime {
 		return this.activeSessions.size;
 	}
 
-	async judgeQuery<T>(options: JudgeQueryOptions<T>): Promise<JudgeQueryResult<T>> {
-		return runJudgeQuery(this.config, options);
+	async judgeQuery<T>(options: JudgeQueryCallOptions<T>): Promise<JudgeQueryResult<T>> {
+		const { costAttribution, ...rest } = options;
+		const recordJudgeCost = (model: string, input: number, output: number, usd: number): void => {
+			if (!costAttribution) return;
+			const ac: AgentCost = {
+				totalUsd: usd,
+				inputTokens: input,
+				outputTokens: output,
+				cacheReadTokens: 0,
+				cacheCreationTokens: 0,
+				modelUsage: {},
+			};
+			this.recordAuxiliarySessionCost(costAttribution.channelId, costAttribution.conversationId, ac, model);
+		};
+		try {
+			const result = await runJudgeQuery(this.config, rest);
+			if (costAttribution) {
+				recordJudgeCost(result.model, result.inputTokens, result.outputTokens, result.costUsd);
+			}
+			return result;
+		} catch (err) {
+			if (costAttribution && err instanceof JudgeSubprocessError) {
+				recordJudgeCost(
+					err.partialCost.model,
+					err.partialCost.inputTokens,
+					err.partialCost.outputTokens,
+					err.partialCost.costUsd,
+				);
+			}
+			throw err;
+		}
+	}
+
+	/**
+	 * Persist a synthetic session row plus one `cost_events` row for auxiliary
+	 * spend (reflection drains, gate Haiku, chat rename, scheduler parse).
+	 */
+	recordAuxiliarySessionCost(channelId: string, conversationId: string, cost: AgentCost, model: string): void {
+		this.sessionStore.create(channelId, conversationId);
+		const sessionKey = `${channelId}:${conversationId}`;
+		this.costTracker.record(sessionKey, cost, model);
+		this.sessionStore.touch(sessionKey);
 	}
 
 	// Returns true when an SDK session exists and can be resumed, meaning the SDK
@@ -172,6 +225,7 @@ export class AgentRuntime {
 					roleTemplate: this.roleTemplate,
 					onboardingPrompt: this.onboardingPrompt,
 					mcpServerFactories: this.mcpServerFactories,
+					onMainAgentLoop: this.mainAgentLoopSink ?? undefined,
 				},
 				sessionKey,
 				wrappedMessage,
@@ -182,7 +236,6 @@ export class AgentRuntime {
 			this.activeSessions.delete(sessionKey);
 		}
 	}
-
 
 	private async runQuery(
 		sessionKey: string,
@@ -200,6 +253,7 @@ export class AgentRuntime {
 		const fileTracker = createFileTracker();
 		const commandBlocker = createDangerousCommandBlocker();
 		const traceWriter = new TraceWriter(sessionKey);
+		const loopMetrics = emptyLoopShapeMetrics();
 		let memoryContext: string | undefined;
 		if (this.memoryContextBuilder) {
 			try {
@@ -285,6 +339,10 @@ export class AgentRuntime {
 						break;
 					}
 					case "assistant": {
+						const delta = absorbAssistantToolPattern(
+							message as { message?: { content?: ReadonlyArray<{ type: string; name?: string; input?: unknown }> } },
+						);
+						applyAssistantLoopDelta(loopMetrics, delta);
 						if (!emittedThinking) {
 							emittedThinking = true;
 							onEvent?.({ type: "thinking" });
@@ -363,11 +421,26 @@ export class AgentRuntime {
 		this.costTracker.record(sessionKey, cost, queryModel);
 		this.sessionStore.touch(sessionKey);
 
+		const durationMs = Date.now() - startTime;
+		const loopPayload: MainAgentLoopPayload = {
+			sessionKey,
+			channelId,
+			conversationId,
+			assistantTurns: loopMetrics.assistantTurns,
+			uniqueReadPaths: loopMetrics.uniqueReadPaths.size,
+			toolCalls: loopMetrics.toolCalls,
+			costUsd: cost.totalUsd,
+			model: this.config.model,
+			durationMs,
+		};
+		this.mainAgentLoopSink?.(loopPayload);
+		console.log(JSON.stringify({ kind: "main_agent_loop", ...loopPayload }));
+
 		return {
 			text: resultText,
 			sessionId: sdkSessionId,
 			cost,
-			durationMs: Date.now() - startTime,
+			durationMs,
 			traceFile: traceWriter.getPath(),
 		};
 	}

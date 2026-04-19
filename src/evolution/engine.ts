@@ -1,10 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { COST_CHANNEL_REFLECTION } from "../agent/cost-source.ts";
 import type { AgentRuntime } from "../agent/runtime.ts";
 import { type EvolutionConfig, loadEvolutionConfig } from "./config.ts";
 import type { GateDecision } from "./gate-types.ts";
 import { appendGateLog, decideGate, recordGateDecision } from "./gate.ts";
+import { JUDGE_MODEL_HAIKU, JUDGE_MODEL_OPUS, JUDGE_MODEL_SONNET } from "./judge-models.ts";
 import {
 	getMetricsSnapshot,
 	readMetrics,
@@ -19,9 +21,16 @@ import type {
 	EvolutionResult,
 	EvolvedConfig,
 	ReflectionSubprocessResult,
+	ReflectionTier,
 	SessionSummary,
 } from "./types.ts";
 import { getEvolutionLog, readVersion } from "./versioning.ts";
+
+function modelForReflectionTier(tier: ReflectionTier): string {
+	if (tier === "haiku") return JUDGE_MODEL_HAIKU;
+	if (tier === "sonnet") return JUDGE_MODEL_SONNET;
+	return JUDGE_MODEL_OPUS;
+}
 
 // Phase 3 evolution engine.
 //
@@ -190,6 +199,7 @@ export class EvolutionEngine {
 			this.notifyConfigApplied();
 		}
 
+		this.recordReflectionCostEvent(result);
 		this.logDrainSummary(result);
 		return result;
 	}
@@ -211,6 +221,12 @@ export class EvolutionEngine {
 			invariantHardFailures: [],
 			invariantSoftWarnings: [],
 			costUsd: 0,
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheCreationTokens: 0,
+			loopAssistantTurns: 0,
+			loopUniqueReadPaths: 0,
 			durationMs: 0,
 			error: null,
 			incrementRetryOnFailure: false,
@@ -295,6 +311,7 @@ export class EvolutionEngine {
 			this.notifyConfigApplied();
 		}
 
+		this.recordReflectionCostEvent(result);
 		this.logDrainSummary(result);
 
 		return {
@@ -313,7 +330,38 @@ export class EvolutionEngine {
 		};
 	}
 
+	private recordReflectionCostEvent(result: ReflectionSubprocessResult): void {
+		if (!this.runtime) return;
+		const spent =
+			result.costUsd > 0 || result.inputTokens > 0 || result.outputTokens > 0 || result.loopAssistantTurns > 0;
+		if (!spent) return;
+		this.runtime.recordAuxiliarySessionCost(
+			COST_CHANNEL_REFLECTION,
+			result.drainId,
+			{
+				totalUsd: result.costUsd,
+				inputTokens: result.inputTokens,
+				outputTokens: result.outputTokens,
+				cacheReadTokens: result.cacheReadTokens,
+				cacheCreationTokens: result.cacheCreationTokens,
+				modelUsage: {},
+			},
+			modelForReflectionTier(result.tier),
+		);
+	}
+
 	private logDrainSummary(result: ReflectionSubprocessResult): void {
+		console.log(
+			JSON.stringify({
+				kind: "reflection_drain_loop",
+				drainId: result.drainId,
+				tier: result.tier,
+				assistantTurns: result.loopAssistantTurns,
+				uniqueReadPaths: result.loopUniqueReadPaths,
+				costUsd: result.costUsd,
+				status: result.status,
+			}),
+		);
 		if (result.status === "ok" && result.changes.length > 0) {
 			console.log(
 				`[evolution] Applied ${result.changes.length} changes (v${result.version}) via ${result.tier}` +

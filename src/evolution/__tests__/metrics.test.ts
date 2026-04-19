@@ -5,6 +5,7 @@ import {
 	emptyReflectionStats,
 	getMetricsSnapshot,
 	readMetrics,
+	recordMainAgentLoopShape,
 	recordReflectionRun,
 	updateAfterEvolution,
 	updateAfterSession,
@@ -117,6 +118,20 @@ describe("evolution metrics", () => {
 			expect(stats.stage_haiku_runs).toBe(0);
 			expect(stats.total_cost_usd).toBe(0);
 			expect(stats.files_touched).toEqual({});
+			expect(stats.loop_assistant_turns_total).toBe(0);
+			expect(stats.loop_unique_read_paths_total).toBe(0);
+		});
+
+		test("recordReflectionRun merges loop-shape counters", () => {
+			const config = testConfig();
+			recordReflectionRun(config, {
+				drains: 1,
+				loop_assistant_turns_total: 7,
+				loop_unique_read_paths_total: 4,
+			});
+			const metrics = JSON.parse(readFileSync(`${TEST_DIR}/meta/metrics.json`, "utf-8"));
+			expect(metrics.reflection_stats.loop_assistant_turns_total).toBe(7);
+			expect(metrics.reflection_stats.loop_unique_read_paths_total).toBe(4);
 		});
 
 		test("recordReflectionRun merges a delta into metrics.json", () => {
@@ -184,6 +199,29 @@ describe("evolution metrics", () => {
 			expect(metrics.session_count).toBe(42);
 			expect(metrics.gate_stats.total_decisions).toBe(7);
 			expect(metrics.reflection_stats.drains).toBe(1);
+		});
+	});
+
+	describe("main_agent_loop_stats", () => {
+		test("recordMainAgentLoopShape merges counters", () => {
+			const config = testConfig();
+			recordMainAgentLoopShape(config, {
+				completed_turns: 1,
+				assistant_turns_sum: 3,
+				unique_read_paths_sum: 2,
+				tool_calls_sum: 5,
+			});
+			recordMainAgentLoopShape(config, {
+				completed_turns: 1,
+				assistant_turns_sum: 1,
+				unique_read_paths_sum: 0,
+				tool_calls_sum: 2,
+			});
+			const metrics = JSON.parse(readFileSync(`${TEST_DIR}/meta/metrics.json`, "utf-8"));
+			expect(metrics.main_agent_loop_stats.completed_turns).toBe(2);
+			expect(metrics.main_agent_loop_stats.assistant_turns_sum).toBe(4);
+			expect(metrics.main_agent_loop_stats.unique_read_paths_sum).toBe(2);
+			expect(metrics.main_agent_loop_stats.tool_calls_sum).toBe(7);
 		});
 	});
 });

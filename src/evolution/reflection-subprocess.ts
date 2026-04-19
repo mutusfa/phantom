@@ -1,6 +1,8 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { query } from "../agent/agent-sdk.ts";
+import { absorbAssistantToolPattern, applyAssistantLoopDelta, emptyLoopShapeMetrics } from "../agent/loop-shape.ts";
+import { extractCost } from "../agent/message-utils.ts";
 import { getThinkingConfig } from "../agent/thinking-config.ts";
 import { buildAgentRuntimeEnv, resolveAgentRuntimeModel } from "../config/providers.ts";
 import type { PhantomConfig } from "../config/types.ts";
@@ -93,6 +95,10 @@ export type SpawnQueryResult = {
 	costUsd: number;
 	inputTokens: number;
 	outputTokens: number;
+	cacheReadTokens?: number;
+	cacheCreationTokens?: number;
+	assistantTurnCount?: number;
+	readPaths?: string[];
 	timedOut: boolean;
 	sigkilled: boolean;
 	error: string | null;
@@ -129,10 +135,33 @@ export async function runReflectionSubprocess(input: ReflectionSubprocessInput):
 		invariantHardFailures: [],
 		invariantSoftWarnings: [],
 		costUsd: 0,
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: 0,
+		cacheCreationTokens: 0,
+		loopAssistantTurns: 0,
+		loopUniqueReadPaths: 0,
 		durationMs: 0,
 		error: null,
 		incrementRetryOnFailure: false,
 		statsDelta: stats,
+	};
+
+	let drainInputTokens = 0;
+	let drainOutputTokens = 0;
+	let drainCacheReadTokens = 0;
+	let drainCacheCreateTokens = 0;
+	const drainLoopMetrics = emptyLoopShapeMetrics();
+
+	const stampDrainTelemetry = (): void => {
+		baseResult.inputTokens = drainInputTokens;
+		baseResult.outputTokens = drainOutputTokens;
+		baseResult.cacheReadTokens = drainCacheReadTokens;
+		baseResult.cacheCreationTokens = drainCacheCreateTokens;
+		baseResult.loopAssistantTurns = drainLoopMetrics.assistantTurns;
+		baseResult.loopUniqueReadPaths = drainLoopMetrics.uniqueReadPaths.size;
+		stats.loop_assistant_turns_total = drainLoopMetrics.assistantTurns;
+		stats.loop_unique_read_paths_total = drainLoopMetrics.uniqueReadPaths.size;
 	};
 
 	// Empty batch is a trivial skip. The cadence never calls us with an
@@ -141,6 +170,7 @@ export async function runReflectionSubprocess(input: ReflectionSubprocessInput):
 		baseResult.status = "skip";
 		baseResult.durationMs = Date.now() - startedAt;
 		stats.status_skip = 1;
+		stampDrainTelemetry();
 		return baseResult;
 	}
 
@@ -188,6 +218,10 @@ export async function runReflectionSubprocess(input: ReflectionSubprocessInput):
 				costUsd: 0,
 				inputTokens: 0,
 				outputTokens: 0,
+				cacheReadTokens: 0,
+				cacheCreationTokens: 0,
+				assistantTurnCount: 0,
+				readPaths: [],
 				timedOut: false,
 				sigkilled: true,
 				error: msg,
@@ -198,6 +232,14 @@ export async function runReflectionSubprocess(input: ReflectionSubprocessInput):
 
 		addCost(stats, queryResult.costUsd);
 		baseResult.costUsd += queryResult.costUsd;
+		drainInputTokens += queryResult.inputTokens;
+		drainOutputTokens += queryResult.outputTokens;
+		drainCacheReadTokens += queryResult.cacheReadTokens ?? 0;
+		drainCacheCreateTokens += queryResult.cacheCreationTokens ?? 0;
+		drainLoopMetrics.assistantTurns += queryResult.assistantTurnCount ?? 0;
+		for (const p of queryResult.readPaths ?? []) {
+			drainLoopMetrics.uniqueReadPaths.add(p);
+		}
 
 		// Subprocess crashed or timed out: restore snapshot, leave rows in
 		// queue, no retry count bump.
@@ -218,6 +260,7 @@ export async function runReflectionSubprocess(input: ReflectionSubprocessInput):
 			baseResult.incrementRetryOnFailure = false;
 			cleanupStaging(batchPath);
 			baseResult.durationMs = Date.now() - startedAt;
+			stampDrainTelemetry();
 			return baseResult;
 		}
 
@@ -248,6 +291,7 @@ export async function runReflectionSubprocess(input: ReflectionSubprocessInput):
 				baseResult.incrementRetryOnFailure = false;
 				cleanupStaging(batchPath);
 				baseResult.durationMs = Date.now() - startedAt;
+				stampDrainTelemetry();
 				return baseResult;
 			}
 			restoreSnapshot(input.config, snapshot);
@@ -263,6 +307,7 @@ export async function runReflectionSubprocess(input: ReflectionSubprocessInput):
 			baseResult.tier = tier;
 			baseResult.escalatedFromTier = escalatedFrom;
 			baseResult.durationMs = Date.now() - startedAt;
+			stampDrainTelemetry();
 			return baseResult;
 		}
 
@@ -290,6 +335,7 @@ export async function runReflectionSubprocess(input: ReflectionSubprocessInput):
 			baseResult.incrementRetryOnFailure = true;
 			cleanupStaging(batchPath);
 			baseResult.durationMs = Date.now() - startedAt;
+			stampDrainTelemetry();
 			return baseResult;
 		}
 
@@ -312,6 +358,7 @@ export async function runReflectionSubprocess(input: ReflectionSubprocessInput):
 			baseResult.tier = tier;
 			baseResult.escalatedFromTier = escalatedFrom;
 			baseResult.durationMs = Date.now() - startedAt;
+			stampDrainTelemetry();
 			return baseResult;
 		}
 
@@ -344,6 +391,7 @@ export async function runReflectionSubprocess(input: ReflectionSubprocessInput):
 		baseResult.version = nextVersion.version;
 		baseResult.changes = changes;
 		baseResult.durationMs = Date.now() - startedAt;
+		stampDrainTelemetry();
 		return baseResult;
 	};
 
@@ -360,6 +408,7 @@ export async function runReflectionSubprocess(input: ReflectionSubprocessInput):
 		baseResult.error = msg;
 		baseResult.incrementRetryOnFailure = false;
 		baseResult.durationMs = Date.now() - startedAt;
+		stampDrainTelemetry();
 		return baseResult;
 	}
 }
@@ -599,6 +648,9 @@ async function defaultRunner(input: SpawnQueryInput): Promise<SpawnQueryResult> 
 	let costUsd = 0;
 	let inputTokens = 0;
 	let outputTokens = 0;
+	let cacheReadTokens = 0;
+	let cacheCreationTokens = 0;
+	const loopMetrics = emptyLoopShapeMetrics();
 	let gotResult = false;
 	let errored: string | null = null;
 
@@ -624,6 +676,11 @@ async function defaultRunner(input: SpawnQueryInput): Promise<SpawnQueryResult> 
 		});
 		for await (const message of stream) {
 			if (message.type === "assistant") {
+				const asst = message as {
+					message?: { content?: ReadonlyArray<{ type: string; name?: string; input?: unknown }> };
+				};
+				const delta = absorbAssistantToolPattern(asst);
+				applyAssistantLoopDelta(loopMetrics, delta);
 				const betaMessage = (message as { message?: { content?: unknown; usage?: unknown } }).message;
 				if (betaMessage) {
 					const content = extractText(betaMessage.content);
@@ -635,12 +692,33 @@ async function defaultRunner(input: SpawnQueryInput): Promise<SpawnQueryResult> 
 					result?: string;
 					total_cost_usd?: number;
 					usage?: { input_tokens?: number; output_tokens?: number };
+					modelUsage?: Record<
+						string,
+						{
+							inputTokens: number;
+							outputTokens: number;
+							cacheReadInputTokens?: number;
+							cacheCreationInputTokens?: number;
+							costUSD: number;
+						}
+					>;
 				};
 				if (m.subtype === "success" && m.result) responseText = m.result;
 				if (m.subtype !== "success") errored = m.subtype;
-				costUsd = m.total_cost_usd ?? 0;
-				inputTokens = m.usage?.input_tokens ?? 0;
-				outputTokens = m.usage?.output_tokens ?? 0;
+				try {
+					const c = extractCost(m as Parameters<typeof extractCost>[0]);
+					costUsd = c.totalUsd;
+					inputTokens = c.inputTokens;
+					outputTokens = c.outputTokens;
+					cacheReadTokens = c.cacheReadTokens;
+					cacheCreationTokens = c.cacheCreationTokens;
+				} catch {
+					costUsd = m.total_cost_usd ?? 0;
+					inputTokens = m.usage?.input_tokens ?? 0;
+					outputTokens = m.usage?.output_tokens ?? 0;
+					cacheReadTokens = 0;
+					cacheCreationTokens = 0;
+				}
 				gotResult = true;
 			}
 		}
@@ -651,6 +729,10 @@ async function defaultRunner(input: SpawnQueryInput): Promise<SpawnQueryResult> 
 			costUsd,
 			inputTokens,
 			outputTokens,
+			cacheReadTokens,
+			cacheCreationTokens,
+			assistantTurnCount: loopMetrics.assistantTurns,
+			readPaths: [...loopMetrics.uniqueReadPaths],
 			timedOut: abortSignal.aborted,
 			sigkilled: !abortSignal.aborted,
 			error: msg,
@@ -665,6 +747,10 @@ async function defaultRunner(input: SpawnQueryInput): Promise<SpawnQueryResult> 
 			costUsd,
 			inputTokens,
 			outputTokens,
+			cacheReadTokens,
+			cacheCreationTokens,
+			assistantTurnCount: loopMetrics.assistantTurns,
+			readPaths: [...loopMetrics.uniqueReadPaths],
 			timedOut: abortSignal.aborted,
 			sigkilled: !abortSignal.aborted,
 			error: "subprocess ended without result frame",
@@ -676,6 +762,10 @@ async function defaultRunner(input: SpawnQueryInput): Promise<SpawnQueryResult> 
 		costUsd,
 		inputTokens,
 		outputTokens,
+		cacheReadTokens,
+		cacheCreationTokens,
+		assistantTurnCount: loopMetrics.assistantTurns,
+		readPaths: [...loopMetrics.uniqueReadPaths],
 		timedOut: false,
 		sigkilled: false,
 		error: errored,

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { EvolutionConfig } from "./config.ts";
-import type { EvolutionMetrics, MetricsSnapshot, ReflectionStats } from "./types.ts";
+import type { EvolutionMetrics, MainAgentLoopStats, MetricsSnapshot, ReflectionStats } from "./types.ts";
 
 // Phase 3 metrics. The auto-rollback fields, consolidation counter, and
 // judge_costs block are gone. A new reflection_stats block replaces judge
@@ -112,6 +112,8 @@ export function emptyReflectionStats(): ReflectionStats {
 		total_cost_usd: 0,
 		compactions_performed: 0,
 		files_touched: {},
+		loop_assistant_turns_total: 0,
+		loop_unique_read_paths_total: 0,
 	};
 }
 
@@ -134,6 +136,41 @@ export function recordReflectionRun(config: EvolutionConfig, delta: Partial<Refl
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : String(err);
 		console.warn(`[evolution] Failed to record reflection stats: ${msg}`);
+	}
+}
+
+export function emptyMainAgentLoopStats(): MainAgentLoopStats {
+	return {
+		completed_turns: 0,
+		assistant_turns_sum: 0,
+		unique_read_paths_sum: 0,
+		tool_calls_sum: 0,
+	};
+}
+
+/**
+ * Merge per-turn main-agent loop counters into `metrics.json` so operators
+ * can compare shape against `reflection_stats` without tailing logs.
+ */
+export function recordMainAgentLoopShape(config: EvolutionConfig, delta: Partial<MainAgentLoopStats>): void {
+	const metricsPath = config.paths.metrics_file;
+	try {
+		let metrics: Record<string, unknown> = {};
+		if (existsSync(metricsPath)) {
+			metrics = JSON.parse(readFileSync(metricsPath, "utf-8"));
+		}
+		const existing = (metrics.main_agent_loop_stats as MainAgentLoopStats | undefined) ?? emptyMainAgentLoopStats();
+		const merged: MainAgentLoopStats = {
+			completed_turns: existing.completed_turns + (delta.completed_turns ?? 0),
+			assistant_turns_sum: existing.assistant_turns_sum + (delta.assistant_turns_sum ?? 0),
+			unique_read_paths_sum: existing.unique_read_paths_sum + (delta.unique_read_paths_sum ?? 0),
+			tool_calls_sum: existing.tool_calls_sum + (delta.tool_calls_sum ?? 0),
+		};
+		metrics.main_agent_loop_stats = merged;
+		writeFileSync(metricsPath, `${JSON.stringify(metrics, null, 2)}\n`, "utf-8");
+	} catch (err: unknown) {
+		const msg = err instanceof Error ? err.message : String(err);
+		console.warn(`[metrics] Failed to record main-agent loop stats: ${msg}`);
 	}
 }
 
