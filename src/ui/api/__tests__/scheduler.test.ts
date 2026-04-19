@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { resolve } from "node:path";
-import { MIGRATIONS } from "../../../db/schema.ts";
+import { runMigrations as runAllMigrations } from "../../../db/migrate.ts";
 import { Scheduler } from "../../../scheduler/service.ts";
 import {
 	clearSchedulerInstanceForTests,
@@ -20,13 +20,7 @@ let sessionToken: string;
 let scheduler: Scheduler;
 
 function runMigrations(target: Database): void {
-	for (const migration of MIGRATIONS) {
-		try {
-			target.run(migration);
-		} catch {
-			// ignore ALTER TABLE duplicate failures on repeated migrations
-		}
-	}
+	runAllMigrations(target);
 }
 
 function createMockRuntime() {
