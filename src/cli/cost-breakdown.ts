@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { type CostBreakdownRow, aggregateCostBreakdown } from "../agent/cost-breakdown-report.ts";
@@ -51,7 +52,11 @@ Sources:
 	const daysRaw = Number.parseInt(parsed.values.days ?? "14", 10);
 	const days = Number.isFinite(daysRaw) ? daysRaw : 14;
 	const dbPath = resolve(process.cwd(), parsed.values.db ?? "data/phantom.db");
-	const db = new Database(dbPath, { create: false, readwrite: false });
+	if (!existsSync(dbPath)) {
+		throw new Error(`Database file not found: ${dbPath}`);
+	}
+	// Bun accepts `readonly`, not `readwrite` (invalid flags raise SQLITE_MISUSE).
+	const db = new Database(dbPath, { readonly: true });
 
 	const rows = aggregateCostBreakdown(db, days);
 	db.close();
