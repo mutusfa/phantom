@@ -13,6 +13,75 @@ import { buildTenantSelfKnowledge } from "./prompt-blocks/tenant-self-knowledge.
 import { buildUIGuidanceLines } from "./prompt-blocks/ui-guidance.ts";
 import { buildWorkingMemory } from "./prompt-blocks/working-memory.ts";
 
+/** Labeled slice of the append-only system prompt (SDK preset `claude_code` + append). */
+export type PromptAssemblySection = {
+	readonly id: string;
+	readonly content: string;
+};
+
+/**
+ * Same composition as {@link assemblePrompt}, but returns ordered sections for
+ * diagnostics (size dumps, UI previews) without string-parsing the combined prompt.
+ */
+export function collectPromptAssemblySections(
+	config: PhantomConfig,
+	memoryContext?: string,
+	evolvedConfig?: EvolvedConfig,
+	roleTemplate?: RoleTemplate,
+	onboardingPrompt?: string,
+	dataDir?: string,
+	envSnapshot?: string,
+	projectContext?: string,
+): PromptAssemblySection[] {
+	const out: PromptAssemblySection[] = [];
+
+	out.push({ id: "identity", content: buildIdentity(config) });
+	out.push({ id: "environment", content: buildEnvironment(config) });
+
+	if (envSnapshot) {
+		out.push({ id: "session_state", content: envSnapshot });
+	}
+
+	out.push({ id: "security", content: buildSecurity() });
+
+	if (roleTemplate) {
+		out.push({ id: "role", content: roleTemplate.systemPromptSection });
+	} else {
+		out.push({ id: "fallback_role", content: buildFallbackRoleHint(config) });
+	}
+
+	if (onboardingPrompt) {
+		out.push({ id: "onboarding", content: onboardingPrompt });
+	}
+
+	if (evolvedConfig) {
+		const evolved = buildEvolvedSections(evolvedConfig);
+		if (evolved) {
+			out.push({ id: "evolved", content: evolved });
+		}
+	}
+
+	out.push({ id: "agent_memory_instructions", content: buildAgentMemoryInstructions() });
+
+	if (projectContext) {
+		out.push({ id: "active_project", content: `# Active Project\n\n${projectContext}` });
+	}
+
+	out.push({ id: "instructions", content: buildInstructions() });
+
+	const resolvedDataDir = dataDir ?? join(process.cwd(), "data");
+	const workingMemory = buildWorkingMemory(resolvedDataDir);
+	if (workingMemory) {
+		out.push({ id: "working_memory", content: workingMemory });
+	}
+
+	if (memoryContext) {
+		out.push({ id: "memory_recall", content: buildMemorySection(memoryContext) });
+	}
+
+	return out;
+}
+
 export function assemblePrompt(
 	config: PhantomConfig,
 	memoryContext?: string,
@@ -267,4 +336,3 @@ function buildChatRuntimeContext(chatRuntimeContext: string): string {
 function buildFallbackRoleHint(config: PhantomConfig): string {
 	return `Your role is ${config.role}. Approach every task with that expertise.`;
 }
-

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PhantomConfig } from "../../config/types.ts";
-import { assemblePrompt } from "../prompt-assembler.ts";
+import { assemblePrompt, collectPromptAssemblySections } from "../prompt-assembler.ts";
 
 const baseConfig: PhantomConfig = {
 	name: "test-phantom",
@@ -316,6 +316,45 @@ describe("assemblePrompt project context", () => {
 		const instructionsIdx = prompt.indexOf("# How You Work");
 		expect(projectIdx).toBeGreaterThan(-1);
 		expect(instructionsIdx).toBeGreaterThan(projectIdx);
+	});
+});
+
+describe("collectPromptAssemblySections", () => {
+	test("joins to the same append string as assemblePrompt", () => {
+		const dataDir = join("/tmp", `phantom-no-wm-${Math.random().toString(36).slice(2)}`);
+		const args = {
+			config: baseConfig,
+			memoryContext: "sample recall body",
+			evolvedConfig: undefined,
+			roleTemplate: undefined,
+			onboardingPrompt: undefined,
+			dataDir,
+			envSnapshot: "# Session\n\nsnapshot line",
+			projectContext: "project ctx line",
+		};
+		const full = assemblePrompt(
+			args.config,
+			args.memoryContext,
+			args.evolvedConfig,
+			args.roleTemplate,
+			args.onboardingPrompt,
+			args.dataDir,
+			args.envSnapshot,
+			args.projectContext,
+		);
+		const fromSections = collectPromptAssemblySections(
+			args.config,
+			args.memoryContext,
+			args.evolvedConfig,
+			args.roleTemplate,
+			args.onboardingPrompt,
+			args.dataDir,
+			args.envSnapshot,
+			args.projectContext,
+		)
+			.map((s) => s.content)
+			.join("\n\n");
+		expect(fromSections).toBe(full);
 	});
 });
 
