@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # Phantom
 
 Phantom is an autonomous AI co-worker that runs as a persistent Bun process on a VM. It wraps the Claude Agent SDK as a subprocess (Anthropic by default, swappable via a `provider:` config block to Z.AI/GLM-5.1, OpenRouter, Ollama, vLLM, LiteLLM, or any Anthropic Messages API compatible endpoint). It maintains vector-backed memory across sessions, rewrites its own configuration through a validated self-evolution engine, communicates via Slack/Web Chat/Telegram/Email/Webhook, and exposes all capabilities as an MCP server. 30,000+ lines of TypeScript, 1,819 tests, v0.20.2. Apache 2.0, repo at ghostwright/phantom.
@@ -42,12 +46,17 @@ If you find yourself writing a function that does something the agent can do bet
 
 ```bash
 bun install                          # Install dependencies
-bun test                             # Run 1,819 tests
+bun test                             # Run all tests
+bun test src/agent/__tests__/foo.test.ts  # Run a single test file
+bun test --testNamePattern "my test" # Run tests matching a name pattern
 bun run src/index.ts                 # Start the server
+bun run dev                          # Start server in watch mode (auto-restart on change)
 bun run src/cli/main.ts init --yes   # Initialize config (reads env vars)
 bun run src/cli/main.ts doctor       # Check all subsystems
 bun run src/cli/main.ts status       # Quick one-liner status
 bun run lint                         # Biome check
+bun run lint:fix                     # Biome check + auto-fix
+bun run format                       # Biome format (write)
 bun run typecheck                    # tsc --noEmit
 
 # Chat UI (separate build)
@@ -103,11 +112,16 @@ src/
     embeddings.ts       # Ollama embedding client
     consolidation.ts    # Session-end memory extraction
   evolution/
-    engine.ts           # 6-step self-evolution orchestrator
-    reflection.ts       # Post-session observation extraction
-    validation.ts       # 5-gate validation (constitution, regression, size, drift, safety)
-    versioning.ts       # Git-like config versioning with rollback
-    judge-models.ts     # Sonnet is the default judge; Opus is opt-in
+    engine.ts               # Evolution engine: mutex guard, queue wiring, drain pipeline
+    gate.ts                 # Phase 1: Haiku judge decides if session has learning signal
+    queue.ts                # SQLite-backed session queue (enqueue, dequeue, retry)
+    cadence.ts              # Phase 2: batch drain on timer (180 min) or demand (depth 5)
+    batch-processor.ts      # Processes a drained batch via reflection subprocess
+    reflection-subprocess.ts # SDK subprocess that reads sessions and proposes config edits
+    invariant-check.ts      # 9-invariant deterministic post-write check (no LLM calls)
+    metrics.ts              # Session and evolution run counters
+    versioning.ts           # Git-like config versioning with rollback
+    judge-models.ts         # Haiku (gate), Sonnet (default reflection), Opus (opt-in)
   mcp/
     server.ts           # MCP Streamable HTTP server
     tools-universal.ts  # 8 universal MCP tools
@@ -156,7 +170,7 @@ docs/                   # Documentation (architecture, channels, mcp, security, 
 
 Message flow: Slack message -> SlackChannel adapter -> ChannelRouter -> SessionManager (find/create session) -> PromptAssembler (base + role + evolved config + memory context) -> AgentRuntime.query() (Opus 4.7 with full tools) -> response -> ChannelRouter -> Slack thread reply. Web chat uses the same flow: POST /chat/sessions/:id/message -> SSE stream of wire frames -> React client renders in real time. Two separate transcripts (wire-format message store for the client, SDK conversation for the agent) are kept in sync.
 
-After each session: EvolutionEngine runs 6-step reflection pipeline -> 5-gate validation -> approved changes applied to phantom-config/ -> version bumped.
+After each session: Haiku gate decides if the session has durable learning signal -> if yes, queued in SQLite -> cadence scheduler drains batches every 180 minutes (or immediately when queue depth hits 5) -> reflection subprocess proposes config edits -> 9-invariant deterministic check (no LLM) -> passing changes written to phantom-config/ -> version bumped.
 
 MCP flow: External client -> /mcp endpoint -> bearer auth -> MCP Server -> tool execution (some route through AgentRuntime for full Opus brain).
 
@@ -308,7 +322,7 @@ The agent's first action on every fresh tenant is `do_first_hour_of_work`, a sin
 
 **Qdrant over LanceDB:** WAL durability with crash recovery. Native hybrid search (dense + BM25 sparse vectors). Named vectors for separate embedding spaces. Mmap mode for low memory. TypeScript REST client works with Bun (no NAPI addon risk).
 
-**Sonnet as default judge model:** The evolution pipeline uses Sonnet as the default judge model for safety-critical gates. Cross-model evaluation avoids self-enhancement bias: the main agent runs on Opus, so judges run on Sonnet. Operators may opt into Opus judges for deeper reasoning at higher cost. Safety/constitution gates use triple-judge minority veto (one dissent blocks the change).
+**Tiered judge models for evolution:** The gate uses Haiku (cheap, fast, per-session) to filter out sessions with no learning signal. The reflection subprocess defaults to Sonnet; operators can opt into Opus for deeper reasoning at higher cost. Cross-model evaluation avoids self-enhancement bias since the main agent runs on Opus. Post-write invariant checks are fully deterministic (no LLM) - nine checks covering file allowlist, constitution immutability, size growth, credential patterns, and subprocess sentinel integrity.
 
 **Factory pattern for MCP servers:** The SDK connects each MCP server instance to one transport and rejects reuse. In-process MCP servers must be recreated per query() call. The registries they wrap are singletons, but the MCP server wrapper is new each time.
 
@@ -429,6 +443,6 @@ Verify after every deploy with `docker exec phantom sh -c 'touch /app/public/_w 
 - [Channels](docs/channels.md) - Slack, Telegram, Email, Webhook configuration
 - [MCP](docs/mcp.md) - Connecting external clients to the MCP server
 - [Memory](docs/memory.md) - Three-tier vector memory architecture
-- [Self-Evolution](docs/self-evolution.md) - The 6-step reflection pipeline
+- [Self-Evolution](docs/self-evolution.md) - The reflection pipeline (gate, queue, cadence, subprocess, invariants)
 - [Security](docs/security.md) - Auth, secrets, permissions, and hardening
 - [Roles](docs/roles.md) - Customizing the agent's specialization
