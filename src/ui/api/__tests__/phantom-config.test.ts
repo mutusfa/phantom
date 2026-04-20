@@ -80,10 +80,10 @@ function seedMemoryYaml(path: string): void {
 		"  dimensions: 768",
 		"  batch_size: 32",
 		"context:",
-		"  max_tokens: 50000",
-		"  episode_limit: 10",
-		"  fact_limit: 20",
-		"  procedure_limit: 5",
+		"  max_tokens: 8000",
+		"  episode_limit: 4",
+		"  fact_limit: 8",
+		"  procedure_limit: 2",
 	].join("\n");
 	writeFileSync(path, `${body}\n`, "utf-8");
 }
@@ -418,7 +418,7 @@ describe("phantom-config API", () => {
 			collections: { episodes: string };
 		};
 		expect(yaml.context.episode_limit).toBe(25);
-		expect(yaml.context.max_tokens).toBe(50000);
+		expect(yaml.context.max_tokens).toBe(8000);
 		expect(yaml.collections.episodes).toBe("episodes");
 	});
 

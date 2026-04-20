@@ -5,7 +5,7 @@
  * Default scenario matches a new Slack or web session: env snapshot on, role
  * YAML from phantom.yaml `role`, evolved markdown from evolution paths,
  * synthetic vector-recall text sized to `config/memory.yaml` context.max_tokens
- * using the same chars-per-token heuristic as MemoryContextBuilder (4).
+ * using the same chars-per-token heuristic as MemoryContextBuilder (3.2).
  *
  * Usage (from repo root):
  *   bun scripts/dump-prompt-size.ts
@@ -22,7 +22,7 @@
  *   --no-role              Use fallback role line instead of loading role YAML
  *   --no-evolved           Skip phantom-config markdown
  *   --no-snapshot          Omit session_state (simulates resumed SDK session)
- *   --memory-mode empty|max   Recall body: none, or synthetic chars = max_tokens*4 (default: max)
+ *   --memory-mode empty|max   Recall body: none, or synthetic chars = max_tokens*3.2 (default: max)
  *   --memory-file PATH     Use file contents as recall body (overrides memory-mode)
  *   --project-file PATH    Append active_project section from file body
  *   --data-dir PATH        Override working memory directory (default: ./data)
@@ -36,10 +36,11 @@ import { loadConfig } from "../src/config/loader.ts";
 import { loadEvolutionConfig } from "../src/evolution/config.ts";
 import type { EvolvedConfig } from "../src/evolution/types.ts";
 import { loadMemoryConfig } from "../src/memory/config.ts";
+import { MEMORY_CONTEXT_CHARS_PER_TOKEN } from "../src/memory/context-builder.ts";
 import { loadRoleFromYaml } from "../src/roles/loader.ts";
 
 // Matches MemoryContextBuilder: rough token estimate used for budgeting.
-const CHARS_PER_TOKEN = 4;
+const CHARS_PER_TOKEN = MEMORY_CONTEXT_CHARS_PER_TOKEN;
 
 type MemoryMode = "empty" | "max";
 
@@ -230,7 +231,7 @@ function main(): void {
 	console.log(`memory.yaml:  ${resolve(cli.memoryYamlPath)} (max_tokens=${memoryYaml.context.max_tokens})`);
 	console.log(`evolved dir:  ${configDir} (included=${cli.includeEvolved})`);
 	console.log(
-		`memory recall: ${cli.memoryFile ? `file:${resolve(cli.memoryFile)}` : cli.memoryMode === "max" ? `synthetic chars=${memoryYaml.context.max_tokens * CHARS_PER_TOKEN}` : "omitted"}`,
+		`memory recall: ${cli.memoryFile ? `file:${resolve(cli.memoryFile)}` : cli.memoryMode === "max" ? `synthetic chars=${Math.round(memoryYaml.context.max_tokens * CHARS_PER_TOKEN)}` : "omitted"}`,
 	);
 	console.log("");
 	console.log(

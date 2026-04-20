@@ -165,10 +165,10 @@ export const MemoryConfigSchema = z.object({
 		.default({}),
 	context: z
 		.object({
-			max_tokens: z.number().int().positive().default(50000),
-			episode_limit: z.number().int().positive().default(10),
-			fact_limit: z.number().int().positive().default(20),
-			procedure_limit: z.number().int().positive().default(5),
+			max_tokens: z.number().int().positive().default(8000),
+			episode_limit: z.number().int().positive().default(4),
+			fact_limit: z.number().int().positive().default(8),
+			procedure_limit: z.number().int().positive().default(2),
 		})
 		.default({}),
 });

@@ -17,7 +17,7 @@ embedding:
   batch_size: 32
 
 context:
-  max_tokens: 50000
-  episode_limit: 10
-  fact_limit: 20
-  procedure_limit: 5
+  max_tokens: 8000
+  episode_limit: 4
+  fact_limit: 8
+  procedure_limit: 2

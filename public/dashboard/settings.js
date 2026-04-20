@@ -140,9 +140,9 @@
 				qdrant_url: (full.memory && full.memory.qdrant_url) || "",
 				ollama_url: (full.memory && full.memory.ollama_url) || "",
 				embedding_model: (full.memory && full.memory.embedding_model) || "",
-				episode_limit: full.memory ? full.memory.episode_limit : 10,
-				fact_limit: full.memory ? full.memory.fact_limit : 20,
-				procedure_limit: full.memory ? full.memory.procedure_limit : 5,
+				episode_limit: full.memory ? full.memory.episode_limit : 4,
+				fact_limit: full.memory ? full.memory.fact_limit : 8,
+				procedure_limit: full.memory ? full.memory.procedure_limit : 2,
 			},
 			permissions: {
 				default_mode: (full.permissions && full.permissions.default_mode) || "bypassPermissions",

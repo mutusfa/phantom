@@ -7,7 +7,7 @@ type MessageParam = SDKUserMessage["message"];
 import { buildAgentRuntimeEnv, resolveAgentRuntimeModel } from "../config/providers.ts";
 import type { PhantomConfig } from "../config/types.ts";
 import type { EvolvedConfig } from "../evolution/types.ts";
-import type { MemoryContextBuilder } from "../memory/context-builder.ts";
+import type { MemoryContextBuildResult, MemoryContextBuilder } from "../memory/context-builder.ts";
 import type { RoleTemplate } from "../roles/types.ts";
 import type { CostTracker } from "./cost-tracker.ts";
 import { type AgentCost, type AgentResponse, emptyCost } from "./events.ts";
@@ -64,9 +64,11 @@ export async function executeChatQuery(
 
 	const textForMemory = extractTextFromMessageParam(message);
 	let memoryContext: string | undefined;
+	let memoryBuild: MemoryContextBuildResult | null = null;
 	if (deps.memoryContextBuilder && textForMemory) {
 		try {
-			memoryContext = (await deps.memoryContextBuilder.build(textForMemory)) || undefined;
+			memoryBuild = await deps.memoryContextBuilder.build(textForMemory);
+			memoryContext = memoryBuild.context || undefined;
 		} catch {
 			/* Memory unavailable */
 		}
@@ -223,6 +225,10 @@ export async function executeChatQuery(
 		costUsd: cost.totalUsd,
 		model: deps.config.model,
 		durationMs,
+		userMessagePreview: textForMemory.slice(0, 200),
+		recalledEpisodeIds: memoryBuild?.recalledEpisodeIds ?? [],
+		recalledFactIds: memoryBuild?.recalledFactIds ?? [],
+		recalledTokenEstimate: memoryBuild?.recalledTokenEstimate ?? 0,
 	};
 	deps.onMainAgentLoop?.(loopPayload);
 	console.log(JSON.stringify({ kind: "main_agent_loop", ...loopPayload }));

@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { MemoryConfig } from "../../config/types.ts";
-import { MemoryContextBuilder } from "../context-builder.ts";
+import { MEMORY_CONTEXT_CHARS_PER_TOKEN, MemoryContextBuilder } from "../context-builder.ts";
 import type { MemorySystem } from "../system.ts";
 
 const TEST_CONFIG: MemoryConfig = {
@@ -8,7 +8,7 @@ const TEST_CONFIG: MemoryConfig = {
 	ollama: { url: "http://localhost:11434", model: "nomic-embed-text" },
 	collections: { episodes: "episodes", semantic_facts: "semantic_facts", procedures: "procedures" },
 	embedding: { dimensions: 768, batch_size: 32 },
-	context: { max_tokens: 50000, episode_limit: 10, fact_limit: 20, procedure_limit: 5 },
+	context: { max_tokens: 8000, episode_limit: 4, fact_limit: 8, procedure_limit: 2 },
 };
 
 function createMockMemorySystem(overrides?: {
@@ -27,23 +27,26 @@ function createMockMemorySystem(overrides?: {
 }
 
 describe("MemoryContextBuilder", () => {
-	test("returns empty string when memory system is not ready", async () => {
+	test("returns empty context when memory system is not ready", async () => {
 		const memory = createMockMemorySystem({ ready: false });
 		const builder = new MemoryContextBuilder(memory, TEST_CONFIG);
 
 		const result = await builder.build("test query");
-		expect(result).toBe("");
+		expect(result.context).toBe("");
+		expect(result.recalledEpisodeIds).toEqual([]);
+		expect(result.recalledFactIds).toEqual([]);
+		expect(result.recalledTokenEstimate).toBe(0);
 	});
 
-	test("returns empty string when no memories found", async () => {
+	test("returns empty context when no memories found", async () => {
 		const memory = createMockMemorySystem();
 		const builder = new MemoryContextBuilder(memory, TEST_CONFIG);
 
 		const result = await builder.build("test query");
-		expect(result).toBe("");
+		expect(result.context).toBe("");
 	});
 
-	test("formats facts section correctly", async () => {
+	test("formats facts section correctly and records fact ids", async () => {
 		const memory = createMockMemorySystem({
 			facts: Promise.resolve([
 				{
@@ -82,13 +85,16 @@ describe("MemoryContextBuilder", () => {
 		const builder = new MemoryContextBuilder(memory, TEST_CONFIG);
 		const result = await builder.build("test query");
 
-		expect(result).toContain("## Known Facts");
-		expect(result).toContain("staging server runs on port 3001");
-		expect(result).toContain("PRs over direct pushes");
-		expect(result).toContain("[confidence: 0.9]");
+		expect(result.context).toContain("## Known Facts");
+		expect(result.context).toContain("staging server runs on port 3001");
+		expect(result.context).toContain("PRs over direct pushes");
+		expect(result.context).toContain("[confidence: 0.9]");
+		expect(result.recalledFactIds).toEqual(["f1", "f2"]);
+		expect(result.recalledEpisodeIds).toEqual([]);
+		expect(result.recalledTokenEstimate).toBe(Math.ceil(result.context.length / MEMORY_CONTEXT_CHARS_PER_TOKEN));
 	});
 
-	test("formats episodes section correctly", async () => {
+	test("formats episodes section correctly and records episode ids", async () => {
 		const memory = createMockMemorySystem({
 			episodes: Promise.resolve([
 				{
@@ -118,10 +124,11 @@ describe("MemoryContextBuilder", () => {
 		const builder = new MemoryContextBuilder(memory, TEST_CONFIG);
 		const result = await builder.build("test query");
 
-		expect(result).toContain("## Recent Memories");
-		expect(result).toContain("[task]");
-		expect(result).toContain("Deployed the staging server");
-		expect(result).toContain("success");
+		expect(result.context).toContain("## Recent Memories");
+		expect(result.context).toContain("[task]");
+		expect(result.context).toContain("Deployed the staging server");
+		expect(result.context).toContain("success");
+		expect(result.recalledEpisodeIds).toEqual(["ep1"]);
 	});
 
 	test("filters stale low-signal episodes from prompt context", async () => {
@@ -175,8 +182,9 @@ describe("MemoryContextBuilder", () => {
 		const builder = new MemoryContextBuilder(memory, TEST_CONFIG);
 		const result = await builder.build("deployment");
 
-		expect(result).toContain("Repeated deployment pattern");
-		expect(result).not.toContain("One-off stale note");
+		expect(result.context).toContain("Repeated deployment pattern");
+		expect(result.context).not.toContain("One-off stale note");
+		expect(result.recalledEpisodeIds).toEqual(["durable-ep"]);
 	});
 
 	test("formats procedure section correctly", async () => {
@@ -219,10 +227,10 @@ describe("MemoryContextBuilder", () => {
 		const builder = new MemoryContextBuilder(memory, TEST_CONFIG);
 		const result = await builder.build("deploy to staging");
 
-		expect(result).toContain("## Relevant Procedure: deploy_staging");
-		expect(result).toContain("1. Run tests");
-		expect(result).toContain("2. Create PR");
-		expect(result).toContain("5 successes");
+		expect(result.context).toContain("## Relevant Procedure: deploy_staging");
+		expect(result.context).toContain("1. Run tests");
+		expect(result.context).toContain("2. Create PR");
+		expect(result.context).toContain("5 successes");
 	});
 
 	test("respects token budget and truncates", async () => {
@@ -252,9 +260,9 @@ describe("MemoryContextBuilder", () => {
 		const builder = new MemoryContextBuilder(memory, smallConfig);
 		const result = await builder.build("test");
 
-		// Context should be bounded
-		const estimatedTokens = Math.ceil(result.length / 4);
-		// It should fit within a reasonable margin of the budget
+		// Whole fact block exceeds budget, so builder omits recall entirely
+		expect(result.context).toBe("");
+		const estimatedTokens = Math.ceil(result.context.length / MEMORY_CONTEXT_CHARS_PER_TOKEN);
 		expect(estimatedTokens).toBeLessThan(200);
 	});
 
@@ -269,6 +277,6 @@ describe("MemoryContextBuilder", () => {
 		const result = await builder.build("test");
 
 		// Should not throw, just return empty
-		expect(result).toBe("");
+		expect(result.context).toBe("");
 	});
 });

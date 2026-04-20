@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { configureAgentSdkRuntime } from "./agent/agent-sdk.ts";
 import { createReflectiveToolServer } from "./agent/in-process-reflective-tools.ts";
 import { createInProcessToolServer } from "./agent/in-process-tools.ts";
+import { appendMainAgentLoopShapeRecord } from "./agent/main-agent-loop-shape-log.ts";
 import { AgentRuntime } from "./agent/runtime.ts";
 import type { RuntimeEvent } from "./agent/runtime.ts";
 import { type AdoPrCommentEvent, AdoWebhookHandler } from "./channels/ado-webhook.ts";
@@ -191,14 +192,6 @@ async function main(): Promise<void> {
 		engine.setOnConfigApplied(() => {
 			runtime.setEvolvedConfig(engine.getConfig());
 		});
-		runtime.setMainAgentLoopSink((payload) => {
-			recordMainAgentLoopShape(engine.getEvolutionConfig(), {
-				completed_turns: 1,
-				assistant_turns_sum: payload.assistantTurns,
-				unique_read_paths_sum: payload.uniqueReadPaths,
-				tool_calls_sum: payload.toolCalls,
-			});
-		});
 		evolutionCadence.start();
 		console.log(
 			`[evolution] Cadence started (cadence=${cadenceConfig.cadenceMinutes}min, demand_trigger=${cadenceConfig.demandTriggerDepth})`,
@@ -207,6 +200,18 @@ async function main(): Promise<void> {
 		const msg = err instanceof Error ? err.message : String(err);
 		console.warn(`[evolution] Failed to initialize: ${msg}. Running without self-evolution.`);
 	}
+
+	runtime.setMainAgentLoopSink((payload) => {
+		appendMainAgentLoopShapeRecord(payload);
+		if (evolution) {
+			recordMainAgentLoopShape(evolution.getEvolutionConfig(), {
+				completed_turns: 1,
+				assistant_turns_sum: payload.assistantTurns,
+				unique_read_paths_sum: payload.uniqueReadPaths,
+				tool_calls_sum: payload.toolCalls,
+			});
+		}
+	});
 
 	if (activeRole) {
 		runtime.setRoleTemplate(activeRole);

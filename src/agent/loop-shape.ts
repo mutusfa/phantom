@@ -64,4 +64,10 @@ export type MainAgentLoopPayload = {
 	costUsd: number;
 	model: string;
 	durationMs: number;
+	/** First 200 characters of the text used for memory recall (may include channel wrappers). */
+	userMessagePreview: string;
+	recalledEpisodeIds: string[];
+	recalledFactIds: string[];
+	/** Token estimate for injected memory context (same heuristic as MemoryContextBuilder). */
+	recalledTokenEstimate: number;
 };

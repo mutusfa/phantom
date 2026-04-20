@@ -3,8 +3,15 @@ import { shouldIncludeEpisodeInContext } from "./ranking.ts";
 import type { MemorySystem } from "./system.ts";
 import type { Episode, Procedure, SemanticFact } from "./types.ts";
 
-// Rough estimate: 1 token is about 4 characters
-const CHARS_PER_TOKEN = 4;
+/** Slightly conservative vs chars/4 so budgeting stays under max_tokens. */
+export const MEMORY_CONTEXT_CHARS_PER_TOKEN = 3.2;
+
+export type MemoryContextBuildResult = {
+	context: string;
+	recalledEpisodeIds: string[];
+	recalledFactIds: string[];
+	recalledTokenEstimate: number;
+};
 
 export class MemoryContextBuilder {
 	private memory: MemorySystem;
@@ -19,9 +26,16 @@ export class MemoryContextBuilder {
 		this.factLimit = config.context.fact_limit;
 	}
 
-	async build(query: string): Promise<string> {
+	async build(query: string): Promise<MemoryContextBuildResult> {
+		const empty: MemoryContextBuildResult = {
+			context: "",
+			recalledEpisodeIds: [],
+			recalledFactIds: [],
+			recalledTokenEstimate: 0,
+		};
+
 		if (!this.memory.isReady()) {
-			return "";
+			return empty;
 		}
 
 		const [episodes, facts, procedure] = await Promise.all([
@@ -32,6 +46,8 @@ export class MemoryContextBuilder {
 
 		const sections: string[] = [];
 		let tokenBudget = this.maxTokens;
+		let recalledFactIds: string[] = [];
+		let recalledEpisodeIds: string[] = [];
 
 		// Known facts get priority - they're the agent's accumulated knowledge
 		if (facts.length > 0) {
@@ -40,17 +56,19 @@ export class MemoryContextBuilder {
 			if (factTokens <= tokenBudget) {
 				sections.push(factSection);
 				tokenBudget -= factTokens;
+				recalledFactIds = facts.map((f) => f.id);
 			}
 		}
 
 		// Recent memories provide episode context
 		if (episodes.length > 0 && tokenBudget > 500) {
 			const durableEpisodes = episodes.filter(shouldIncludeEpisodeInContext);
-			const episodeSection = this.formatEpisodes(durableEpisodes, tokenBudget);
+			const { text: episodeSection, includedIds } = this.formatEpisodes(durableEpisodes, tokenBudget);
 			const episodeTokens = this.estimateTokens(episodeSection);
 			if (episodeSection) {
 				sections.push(episodeSection);
 				tokenBudget -= episodeTokens;
+				recalledEpisodeIds = includedIds;
 			}
 		}
 
@@ -63,9 +81,15 @@ export class MemoryContextBuilder {
 			}
 		}
 
-		if (sections.length === 0) return "";
+		if (sections.length === 0) return empty;
 
-		return sections.join("\n\n");
+		const context = sections.join("\n\n");
+		return {
+			context,
+			recalledEpisodeIds,
+			recalledFactIds,
+			recalledTokenEstimate: this.estimateTokens(context),
+		};
 	}
 
 	private formatFacts(facts: SemanticFact[]): string {
@@ -73,21 +97,23 @@ export class MemoryContextBuilder {
 		return `## Known Facts\n${lines.join("\n")}`;
 	}
 
-	private formatEpisodes(episodes: Episode[], tokenBudget: number): string {
-		if (episodes.length === 0) return "";
+	private formatEpisodes(episodes: Episode[], tokenBudget: number): { text: string; includedIds: string[] } {
+		if (episodes.length === 0) return { text: "", includedIds: [] };
 
 		const header = "## Recent Memories\n";
 		let content = header;
-		const maxChars = tokenBudget * CHARS_PER_TOKEN;
+		const includedIds: string[] = [];
+		const maxChars = tokenBudget * MEMORY_CONTEXT_CHARS_PER_TOKEN;
 
 		for (const ep of episodes) {
 			const entry = `- [${ep.type}] ${ep.summary} (${ep.outcome}, ${formatRelativeTime(ep.started_at)})\n`;
 
 			if (content.length + entry.length > maxChars) break;
 			content += entry;
+			includedIds.push(ep.id);
 		}
 
-		return content.trim();
+		return { text: content.trim(), includedIds };
 	}
 
 	private formatProcedure(procedure: Procedure): string {
@@ -103,7 +129,7 @@ export class MemoryContextBuilder {
 	}
 
 	private estimateTokens(text: string): number {
-		return Math.ceil(text.length / CHARS_PER_TOKEN);
+		return Math.ceil(text.length / MEMORY_CONTEXT_CHARS_PER_TOKEN);
 	}
 }
 

@@ -5,7 +5,7 @@ type MessageParam = SDKUserMessage["message"];
 import { buildAgentRuntimeEnv, resolveAgentRuntimeModel } from "../config/providers.ts";
 import type { PhantomConfig } from "../config/types.ts";
 import type { EvolvedConfig } from "../evolution/types.ts";
-import type { MemoryContextBuilder } from "../memory/context-builder.ts";
+import type { MemoryContextBuildResult, MemoryContextBuilder } from "../memory/context-builder.ts";
 import type { RoleTemplate } from "../roles/types.ts";
 import { executeChatQuery } from "./chat-query.ts";
 import { CostTracker } from "./cost-tracker.ts";
@@ -255,9 +255,11 @@ export class AgentRuntime {
 		const traceWriter = new TraceWriter(sessionKey);
 		const loopMetrics = emptyLoopShapeMetrics();
 		let memoryContext: string | undefined;
+		let memoryBuild: MemoryContextBuildResult | null = null;
 		if (this.memoryContextBuilder) {
 			try {
-				memoryContext = (await this.memoryContextBuilder.build(text)) || undefined;
+				memoryBuild = await this.memoryContextBuilder.build(text);
+				memoryContext = memoryBuild.context || undefined;
 			} catch {
 				/* Memory unavailable */
 			}
@@ -432,6 +434,10 @@ export class AgentRuntime {
 			costUsd: cost.totalUsd,
 			model: this.config.model,
 			durationMs,
+			userMessagePreview: text.slice(0, 200),
+			recalledEpisodeIds: memoryBuild?.recalledEpisodeIds ?? [],
+			recalledFactIds: memoryBuild?.recalledFactIds ?? [],
+			recalledTokenEstimate: memoryBuild?.recalledTokenEstimate ?? 0,
 		};
 		this.mainAgentLoopSink?.(loopPayload);
 		console.log(JSON.stringify({ kind: "main_agent_loop", ...loopPayload }));

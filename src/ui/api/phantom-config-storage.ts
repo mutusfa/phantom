@@ -108,9 +108,9 @@ function readMemoryConfig(): PhantomConfigForUi["memory"] {
 		qdrant_url: "http://localhost:6333",
 		ollama_url: "http://localhost:11434",
 		embedding_model: "nomic-embed-text",
-		episode_limit: 10,
-		fact_limit: 20,
-		procedure_limit: 5,
+		episode_limit: 4,
+		fact_limit: 8,
+		procedure_limit: 2,
 	};
 	if (!res.ok) return fallback;
 	const m = res.value;

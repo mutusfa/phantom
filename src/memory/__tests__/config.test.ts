@@ -56,6 +56,6 @@ describe("loadMemoryConfig env overrides", () => {
 		const config = loadMemoryConfig();
 		expect(config.collections.episodes).toBe("episodes");
 		expect(config.embedding.dimensions).toBe(768);
-		expect(config.context.max_tokens).toBe(50000);
+		expect(config.context.max_tokens).toBe(8000);
 	});
 });
