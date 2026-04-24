@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { type SDKMessage, type SDKUserMessage, query } from "./agent-sdk.ts";
 
 type MessageParam = SDKUserMessage["message"];
+import type { MessageAttachment } from "../channels/types.ts";
 import { buildAgentRuntimeEnv, resolveAgentRuntimeModel } from "../config/providers.ts";
 import type { PhantomConfig } from "../config/types.ts";
 import type { EvolvedConfig } from "../evolution/types.ts";
@@ -102,6 +103,7 @@ export class AgentRuntime {
 		text: string,
 		onEvent?: (event: RuntimeEvent) => void,
 		projectOptions?: { context?: string; cwd?: string },
+		attachments?: MessageAttachment[],
 	): Promise<AgentResponse> {
 		const sessionKey = `${channelId}:${conversationId}`;
 		const startTime = Date.now();
@@ -128,6 +130,7 @@ export class AgentRuntime {
 				startTime,
 				onEvent,
 				projectOptions,
+				attachments,
 			);
 		} finally {
 			this.activeSessions.delete(sessionKey);
@@ -245,6 +248,7 @@ export class AgentRuntime {
 		startTime: number,
 		onEvent?: (event: RuntimeEvent) => void,
 		projectOptions?: { context?: string; cwd?: string },
+		attachments?: MessageAttachment[],
 	): Promise<AgentResponse> {
 		let session = this.sessionStore.findActive(channelId, conversationId);
 		const isResume = session?.sdk_session_id != null;
@@ -289,6 +293,33 @@ export class AgentRuntime {
 		const queryModel = resolveAgentRuntimeModel(this.config, this.config.model);
 		const providerEnv = buildAgentRuntimeEnv(this.config, queryModel);
 
+		const hasImageAttachments = (attachments?.length ?? 0) > 0;
+		// Build an async iterable yielding one multimodal SDKUserMessage when images
+		// are attached. The SDK accepts either a plain string prompt or an async
+		// iterable of SDKUserMessage; we only switch to the iterable path when we
+		// actually have non-text content to carry.
+		const makeMultimodalPrompt = (): AsyncGenerator<SDKUserMessage> => {
+			const textBlock = { type: "text" as const, text };
+			const imageBlocks = (attachments ?? []).map((a) => ({
+				type: "image" as const,
+				source: {
+					type: "base64" as const,
+					media_type: a.mediaType,
+					data: a.dataBase64,
+				},
+			}));
+			const content = [textBlock, ...imageBlocks] as unknown as MessageParam["content"];
+			async function* gen(): AsyncGenerator<SDKUserMessage> {
+				yield {
+					type: "user" as const,
+					message: { role: "user", content } as MessageParam,
+					parent_tool_use_id: null,
+					session_id: "",
+				} as SDKUserMessage;
+			}
+			return gen();
+		};
+
 		const runSdkQuery = async (useResume: boolean, contextNote?: string): Promise<void> => {
 			const permissionOptions = permissionOptionsFromConfig(this.config);
 			const mcpFactoryContext = { sessionKey, channelId, conversationId };
@@ -296,7 +327,7 @@ export class AgentRuntime {
 			// knows the session was reset rather than being confused by lost history.
 			const finalPrompt = contextNote ? `${appendPrompt}\n\n# Session Recovery\n\n${contextNote}` : appendPrompt;
 			const queryStream = query({
-				prompt: text,
+				prompt: hasImageAttachments ? makeMultimodalPrompt() : text,
 				options: {
 					model: queryModel,
 					...permissionOptions,

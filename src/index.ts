@@ -21,6 +21,7 @@ import { SlackMetrics } from "./channels/slack-metrics.ts";
 import type { SlackTransport } from "./channels/slack-transport.ts";
 import { createStatusReactionController } from "./channels/status-reactions.ts";
 import { TelegramChannel } from "./channels/telegram.ts";
+import type { MessageAttachment } from "./channels/types.ts";
 import { WebhookChannel } from "./channels/webhook.ts";
 import { DEFAULT_METADATA_BASE_URL } from "./config/identity-fetcher.ts";
 import { loadChannelsConfig, loadConfig } from "./config/loader.ts";
@@ -232,13 +233,21 @@ async function main(): Promise<void> {
 		text: string,
 		onEvent?: (event: RuntimeEvent) => void,
 		explicit?: ProjectBindingInput,
+		attachments?: MessageAttachment[],
 	) => {
 		const resolved = resolveProjectForQuery(projectRegistry, evolution, channelId, conversationId, explicit);
 		if (resolved.mergedEvolvedForQuery && evolution) {
 			runtime.setEvolvedConfig(resolved.mergedEvolvedForQuery);
 		}
 		try {
-			return await runtime.handleMessage(channelId, conversationId, text, onEvent, resolved.projectOptions);
+			return await runtime.handleMessage(
+				channelId,
+				conversationId,
+				text,
+				onEvent,
+				resolved.projectOptions,
+				attachments,
+			);
 		} finally {
 			if (resolved.mergedEvolvedForQuery && evolution) {
 				runtime.setEvolvedConfig(evolution.getConfig());
@@ -853,6 +862,8 @@ async function main(): Promise<void> {
 						break;
 				}
 			},
+			undefined,
+			msg.attachments,
 		);
 
 		// Track assistant messages

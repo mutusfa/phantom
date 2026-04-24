@@ -12,8 +12,16 @@ import {
 	egressUpdateMessage,
 } from "./slack-egress.ts";
 import { NoopSlackMetrics, type SlackMetricsEmitter } from "./slack-metrics.ts";
+import { processSlackFiles } from "./slack-files.ts";
 import { splitMessage, toSlackMarkdown } from "./slack-formatter.ts";
-import type { Channel, ChannelCapabilities, InboundMessage, OutboundMessage, SentMessage } from "./types.ts";
+import type {
+	Channel,
+	ChannelCapabilities,
+	InboundMessage,
+	MessageAttachment,
+	OutboundMessage,
+	SentMessage,
+} from "./types.ts";
 
 export type SlackChannelConfig = {
 	botToken: string;
@@ -179,45 +187,11 @@ export class SlackChannel implements Channel {
 		this.connectedAtMs = null;
 	}
 
-	// Downloads text-based files attached to a Slack message and returns formatted content.
-	// Only fetches files under 200KB with text mimetypes to avoid overwhelming the context.
-	private async fetchSlackFiles(files: unknown[]): Promise<string> {
-		const TEXT_MIMETYPES = ["text/", "application/json", "application/xml", "application/yaml"];
-		const MAX_SIZE = 200 * 1024;
-		const parts: string[] = [];
-
-		for (const file of files) {
-			const f = file as Record<string, unknown>;
-			const name = (f.name as string) ?? "file";
-			const mimetype = (f.mimetype as string) ?? "";
-			const size = (f.size as number) ?? 0;
-			const url = (f.url_private_download as string) ?? (f.url_private as string) ?? "";
-
-			if (!url) continue;
-			if (size > MAX_SIZE) {
-				parts.push(`[File "${name}" skipped - too large (${Math.round(size / 1024)}KB)]`);
-				continue;
-			}
-			if (!TEXT_MIMETYPES.some((t) => mimetype.startsWith(t))) {
-				parts.push(`[File "${name}" skipped - binary format (${mimetype})]`);
-				continue;
-			}
-
-			try {
-				const res = await fetch(url, { headers: { Authorization: `Bearer ${this.botToken}` } });
-				if (!res.ok) {
-					parts.push(`[File "${name}" could not be downloaded: HTTP ${res.status}]`);
-					continue;
-				}
-				const content = await res.text();
-				parts.push(`--- Attached file: ${name} ---\n${content}\n--- End of ${name} ---`);
-			} catch (err: unknown) {
-				const msg = err instanceof Error ? err.message : String(err);
-				parts.push(`[File "${name}" download failed: ${msg}]`);
-			}
-		}
-
-		return parts.join("\n\n");
+	// Downloads files attached to a Slack message. Text files are returned as
+	// delimited text; images are returned as base64 attachments so they can
+	// reach the agent as real image content blocks rather than a placeholder.
+	private async fetchSlackFiles(files: unknown[]): Promise<{ text: string; attachments: MessageAttachment[] }> {
+		return processSlackFiles(files, this.botToken);
 	}
 
 	setPhantomName(name: string): void {
@@ -487,9 +461,9 @@ export class SlackChannel implements Channel {
 			const cleanText = this.stripBotMention(event.text);
 			const ev = event as unknown as Record<string, unknown>;
 			const files = Array.isArray(ev.files) ? ev.files : [];
-			const fileContent = files.length > 0 ? await this.fetchSlackFiles(files) : "";
-			const fullText = [cleanText.trim(), fileContent].filter(Boolean).join("\n\n");
-			if (!fullText) return;
+			const processed = files.length > 0 ? await this.fetchSlackFiles(files) : { text: "", attachments: [] };
+			const fullText = [cleanText.trim(), processed.text].filter(Boolean).join("\n\n");
+			if (!fullText && processed.attachments.length === 0) return;
 
 			const threadTs = event.thread_ts ?? event.ts;
 			const conversationId = buildConversationId(event.channel, threadTs);
@@ -501,6 +475,7 @@ export class SlackChannel implements Channel {
 				threadId: threadTs,
 				senderId,
 				text: fullText,
+				attachments: processed.attachments.length > 0 ? processed.attachments : undefined,
 				timestamp: new Date(Number.parseFloat(event.ts) * 1000),
 				metadata: {
 					slackChannel: event.channel,
@@ -541,9 +516,9 @@ export class SlackChannel implements Channel {
 
 			const text = (msg.text as string) ?? "";
 			const files = Array.isArray(msg.files) ? (msg.files as unknown[]) : [];
-			const fileContent = files.length > 0 ? await this.fetchSlackFiles(files) : "";
-			const fullText = [text.trim(), fileContent].filter(Boolean).join("\n\n");
-			if (!fullText) return;
+			const processed = files.length > 0 ? await this.fetchSlackFiles(files) : { text: "", attachments: [] };
+			const fullText = [text.trim(), processed.text].filter(Boolean).join("\n\n");
+			if (!fullText && processed.attachments.length === 0) return;
 
 			const channel = msg.channel as string;
 			const ts = msg.ts as string;
@@ -560,6 +535,7 @@ export class SlackChannel implements Channel {
 				threadId: threadTs,
 				senderId: userId ?? "unknown",
 				text: fullText,
+				attachments: processed.attachments.length > 0 ? processed.attachments : undefined,
 				timestamp: new Date(Number.parseFloat(ts) * 1000),
 				metadata: {
 					slackChannel: channel,

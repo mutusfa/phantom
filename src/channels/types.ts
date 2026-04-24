@@ -1,3 +1,13 @@
+// Binary content carried through the channel layer into the agent runtime.
+// Images flow as base64 so they can be passed directly as Anthropic image
+// content blocks without a second network round-trip.
+export type MessageAttachment = {
+	kind: "image";
+	mediaType: string;
+	dataBase64: string;
+	name?: string;
+};
+
 export type InboundMessage = {
 	id: string;
 	channelId: string;
@@ -7,6 +17,7 @@ export type InboundMessage = {
 	senderName?: string;
 	text: string;
 	timestamp: Date;
+	attachments?: MessageAttachment[];
 	metadata?: Record<string, unknown>;
 };
 
