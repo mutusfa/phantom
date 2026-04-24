@@ -156,7 +156,7 @@ src/
     check-migrations.ts # Entry point for the migration-safety gate
     connection.ts       # Database connection
 config/                 # YAML configs (phantom.yaml, channels.yaml, mcp.yaml, roles/)
-phantom-config/         # Evolved agent config (constitution, persona, domain knowledge)
+data/phantom-config/    # Evolved agent config (constitution, persona, domain knowledge). Live location read by the engine; path set in config/evolution.yaml.
 data/projects/<name>/   # Per-project context.md + evolved/ (separate evolution version stream)
 public/                 # Web UI files (_base.html template, index.html)
 chat-ui/                # React 19 SPA (Vite + shadcn + Tailwind v4). Built to public/chat/
@@ -170,7 +170,7 @@ docs/                   # Documentation (architecture, channels, mcp, security, 
 
 Message flow: Slack message -> SlackChannel adapter -> ChannelRouter -> SessionManager (find/create session) -> PromptAssembler (base + role + evolved config + memory context) -> AgentRuntime.query() (Opus 4.7 with full tools) -> response -> ChannelRouter -> Slack thread reply. Web chat uses the same flow: POST /chat/sessions/:id/message -> SSE stream of wire frames -> React client renders in real time. Two separate transcripts (wire-format message store for the client, SDK conversation for the agent) are kept in sync.
 
-After each session: Haiku gate decides if the session has durable learning signal -> if yes, queued in SQLite -> cadence scheduler drains batches every 180 minutes (or immediately when queue depth hits 5) -> reflection subprocess proposes config edits -> 9-invariant deterministic check (no LLM) -> passing changes written to phantom-config/ -> version bumped.
+After each session: Haiku gate decides if the session has durable learning signal -> if yes, queued in SQLite -> cadence scheduler drains batches every 180 minutes (or immediately when queue depth hits 5) -> reflection subprocess proposes config edits -> 9-invariant deterministic check (no LLM) -> passing changes written to data/phantom-config/ -> version bumped.
 
 MCP flow: External client -> /mcp endpoint -> bearer auth -> MCP Server -> tool execution (some route through AgentRuntime for full Opus brain).
 
@@ -419,7 +419,7 @@ Verify after every deploy with `docker exec phantom sh -c 'touch /app/public/_w 
 | `src/chat/http.ts` | Web chat backend. SSE streaming, session routing, API handlers. |
 | `src/core/server.ts` | HTTP server. Routes, health endpoint, version. |
 | `config/roles/swe.yaml` | SWE role template. Onboarding questions, tools, evolution focus. |
-| `phantom-config/constitution.md` | Immutable principles the evolution engine cannot modify. |
+| `data/phantom-config/constitution.md` | Immutable principles the evolution engine cannot modify. |
 | `Dockerfile` | Multi-stage build, non-root user, tini, health check. |
 | `docker-compose.yaml` | Three-service stack with named volumes and socket mount. |
 
@@ -429,7 +429,7 @@ Verify after every deploy with `docker exec phantom sh -c 'touch /app/public/_w 
 - **Don't modify frozen Specter templates.** The cloud-init, systemd unit, and Caddyfile in Specter are shared across all deployments. Changes there affect every VM.
 - **Don't run as root in Docker.** Claude Code CLI rejects --dangerously-skip-permissions as root. The non-root phantom user with group_add for Docker socket is the correct pattern.
 - **Don't use inline handlers for dynamic tools.** The "inline" handler type (new Function) was removed in Phase A for RCE prevention. Only "shell" and "script" handlers are allowed.
-- **Don't store secrets in phantom-config/ or memory.** Evolved config is version-controlled and visible. Secrets go in .env files only.
+- **Don't store secrets in data/phantom-config/ or memory.** Evolved config is version-controlled and visible. Secrets go in .env files only.
 - **Don't commit .env files.** All .env variants are gitignored. Use .env.example as reference.
 - **Don't put var() references in text/tailwindcss blocks.** Tailwind v4 Browser CDN's parser breaks on var(--color-*) inside complex CSS values like linear-gradient(). Declarations go in tailwindcss, references go in plain CSS.
 - **Don't reuse MCP server instances across query() calls.** The SDK connects each instance to one transport. Create fresh instances per call (factory pattern).

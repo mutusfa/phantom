@@ -106,6 +106,7 @@ type StubRuntime = {
 		omitPreset?: boolean;
 	}) => Promise<unknown>;
 	getPhantomConfig: () => unknown;
+	recordAuxiliarySessionCost: (channelId: string, conversationId: string, cost: unknown, model: string) => void;
 };
 
 function fireGateRuntime(): StubRuntime {
@@ -122,6 +123,7 @@ function fireGateRuntime(): StubRuntime {
 			durationMs: 800,
 		}),
 		getPhantomConfig: () => ({ provider: { type: "anthropic" } }),
+		recordAuxiliarySessionCost: () => {},
 	};
 }
 

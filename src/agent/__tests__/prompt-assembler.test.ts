@@ -82,7 +82,7 @@ describe("assemblePrompt Docker awareness", () => {
 describe("assemblePrompt agent memory instructions", () => {
 	test("includes the canonical agent-notes.md path", () => {
 		const prompt = assemblePrompt(baseConfig);
-		expect(prompt).toContain("phantom-config/memory/agent-notes.md");
+		expect(prompt).toContain("data/phantom-config/memory/agent-notes.md");
 	});
 
 	test("instructs the agent to append learnings via Write or Edit", () => {
@@ -100,17 +100,16 @@ describe("assemblePrompt agent memory instructions", () => {
 		expect(prompt).toContain("Ephemeral task state");
 	});
 
-	test("canonical agent-notes.md file is committed with a short header", () => {
-		// The file is checked in as a baseline so the agent has something to
-		// Edit on day one rather than having to Write a file it has never seen.
-		const notesPath = join(process.cwd(), "phantom-config/memory/agent-notes.md");
+	test("canonical agent-notes.md file exists with the expected header", () => {
+		// The file is seeded so the agent has something to Edit on day one
+		// rather than having to Write a file it has never seen. It is
+		// append-only: once the agent starts using it, it will grow without
+		// bound, so the only invariant worth checking is the seed header.
+		const notesPath = join(process.cwd(), "data/phantom-config/memory/agent-notes.md");
 		expect(existsSync(notesPath)).toBe(true);
 		const content = readFileSync(notesPath, "utf-8");
 		expect(content).toContain("# Agent notes");
 		expect(content).toContain("append-only");
-		// Header under 10 content lines keeps it scannable.
-		const lines = content.split("\n").filter((l) => l.trim().length > 0);
-		expect(lines.length).toBeLessThanOrEqual(10);
 	});
 
 	test("does not inject agent-notes.md file contents into the system prompt", () => {

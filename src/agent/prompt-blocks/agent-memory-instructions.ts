@@ -1,9 +1,8 @@
 // Teaches the main agent (Opus 4.7) to write its own learnings into a single
-// canonical file at phantom-config/memory/agent-notes.md via the Write or
-// Edit tool. Research across three VMs (108 lifetime sessions, 117 applied
-// evolution deltas) showed the agent memory audit log has two rows lifetime,
-// both user-authored, zero agent-originated writes. The path was empirically
-// empty. This block lights it up.
+// canonical file via the Write or Edit tool. Research across three VMs (108
+// lifetime sessions, 117 applied evolution deltas) showed the agent memory
+// audit log has two rows lifetime, both user-authored, zero agent-originated
+// writes. The path was empirically empty. This block lights it up.
 //
 // Scope is deliberately narrow: one canonical file, append-only, short dated
 // entries, no reorganization. Multiple files and free-form memory targets are
@@ -11,7 +10,9 @@
 // design. The block is intentionally small (target under 400 tokens) so it
 // does not bloat the system prompt on every query.
 
-export const AGENT_NOTES_PATH = "phantom-config/memory/agent-notes.md";
+import { AGENT_NOTES_PATH } from "../../config/phantom-config-paths";
+
+export { AGENT_NOTES_PATH };
 
 export function buildAgentMemoryInstructions(): string {
 	return [

@@ -15,6 +15,10 @@
 
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import {
+	PHANTOM_CONFIG_MEMORY_DIR,
+	PHANTOM_CONFIG_VIRTUAL_PREFIX,
+} from "../config/phantom-config-paths";
 
 const USER_ENV_OVERRIDE = "PHANTOM_MEMORY_FILES_ROOT";
 const PHANTOM_CONFIG_MEMORY_OVERRIDE = "PHANTOM_CONFIG_MEMORY_ROOT";
@@ -25,11 +29,13 @@ const PHANTOM_CONFIG_MEMORY_OVERRIDE = "PHANTOM_CONFIG_MEMORY_ROOT";
 export const EXCLUDED_TOP_DIRS = new Set<string>(["skills", "plugins", "agents"]);
 export const EXCLUDED_TOP_FILES = new Set<string>(["settings.json", "settings.local.json"]);
 
-// Virtual-path prefix the dashboard uses to surface files from
-// `phantom-config/memory/` without mixing them into the `.claude/` walk.
+// Virtual-path prefix the dashboard uses to surface files from the agent's
+// phantom-config memory root without mixing them into the `.claude/` walk.
 // Files under this prefix are read-only in the dashboard: the agent writes
 // them during evolution, and manual edits would race the agent's appends.
-export const PHANTOM_CONFIG_VIRTUAL_PREFIX = "phantom-config/memory/";
+// The string value is sourced from `config/phantom-config-paths` so it stays
+// in sync with the on-disk layout.
+export { PHANTOM_CONFIG_VIRTUAL_PREFIX };
 
 // Allow-list of phantom-config memory files the dashboard surfaces. Kept
 // explicit so the dashboard never accidentally reveals an unrelated file
@@ -49,7 +55,7 @@ export function getPhantomConfigMemoryRoot(): string {
 	if (override) {
 		return resolve(override);
 	}
-	return resolve(process.cwd(), "phantom-config/memory");
+	return resolve(process.cwd(), PHANTOM_CONFIG_MEMORY_DIR);
 }
 
 /**
