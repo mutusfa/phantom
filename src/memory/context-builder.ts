@@ -18,12 +18,16 @@ export class MemoryContextBuilder {
 	private maxTokens: number;
 	private episodeLimit: number;
 	private factLimit: number;
+	private episodeMinScore: number;
+	private factMinScore: number;
 
 	constructor(memory: MemorySystem, config: MemoryConfig) {
 		this.memory = memory;
 		this.maxTokens = config.context.max_tokens;
 		this.episodeLimit = config.context.episode_limit;
 		this.factLimit = config.context.fact_limit;
+		this.episodeMinScore = config.context.episode_min_score;
+		this.factMinScore = config.context.fact_min_score;
 	}
 
 	async build(query: string): Promise<MemoryContextBuildResult> {
@@ -39,8 +43,8 @@ export class MemoryContextBuilder {
 		}
 
 		const [episodes, facts, procedure] = await Promise.all([
-			this.memory.recallEpisodes(query, { limit: this.episodeLimit }).catch(() => []),
-			this.memory.recallFacts(query, { limit: this.factLimit }).catch(() => []),
+			this.memory.recallEpisodes(query, { limit: this.episodeLimit, minScore: this.episodeMinScore }).catch(() => []),
+			this.memory.recallFacts(query, { limit: this.factLimit, minScore: this.factMinScore }).catch(() => []),
 			this.memory.findProcedure(query).catch(() => null),
 		]);
 

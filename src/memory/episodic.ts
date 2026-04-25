@@ -110,7 +110,9 @@ export class EpisodicStore {
 		});
 
 		const scored = this.applyStrategy(results, strategy);
-		const topResults = scored.slice(0, limit);
+		const minScore = options?.minScore ?? 0;
+		const filtered = minScore > 0 ? scored.filter((r) => r.score >= minScore) : scored;
+		const topResults = filtered.slice(0, limit);
 
 		// Update access counts in background
 		this.updateAccessCounts(topResults.map((r) => r.id)).catch(() => {});

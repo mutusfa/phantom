@@ -8,7 +8,7 @@ const TEST_CONFIG: MemoryConfig = {
 	ollama: { url: "http://localhost:11434", model: "nomic-embed-text" },
 	collections: { episodes: "episodes", semantic_facts: "semantic_facts", procedures: "procedures" },
 	embedding: { dimensions: 768, batch_size: 32 },
-	context: { max_tokens: 8000, episode_limit: 4, fact_limit: 8, procedure_limit: 2 },
+	context: { max_tokens: 8000, episode_limit: 4, fact_limit: 8, procedure_limit: 2, episode_min_score: 0.3, fact_min_score: 0.45 },
 };
 
 function createMockMemorySystem(overrides?: {
@@ -255,7 +255,6 @@ describe("MemoryContextBuilder", () => {
 			facts: Promise.resolve(manyFacts),
 		});
 
-		// Use a very small token budget
 		const smallConfig = { ...TEST_CONFIG, context: { ...TEST_CONFIG.context, max_tokens: 100 } };
 		const builder = new MemoryContextBuilder(memory, smallConfig);
 		const result = await builder.build("test");
@@ -278,5 +277,33 @@ describe("MemoryContextBuilder", () => {
 
 		// Should not throw, just return empty
 		expect(result.context).toBe("");
+	});
+
+	test("passes episode_min_score and fact_min_score from config to recall calls", async () => {
+		const memory = createMockMemorySystem();
+		const config: MemoryConfig = {
+			...TEST_CONFIG,
+			context: { ...TEST_CONFIG.context, episode_min_score: 0.6, fact_min_score: 0.7 },
+		};
+		const builder = new MemoryContextBuilder(memory, config);
+		await builder.build("test query");
+
+		const episodeMock = (memory.recallEpisodes as ReturnType<typeof mock>);
+		const factMock = (memory.recallFacts as ReturnType<typeof mock>);
+
+		expect(episodeMock.mock.calls[0][1]).toMatchObject({ minScore: 0.6 });
+		expect(factMock.mock.calls[0][1]).toMatchObject({ minScore: 0.7 });
+	});
+
+	test("uses default thresholds from config when not overridden", async () => {
+		const memory = createMockMemorySystem();
+		const builder = new MemoryContextBuilder(memory, TEST_CONFIG);
+		await builder.build("test query");
+
+		const episodeMock = (memory.recallEpisodes as ReturnType<typeof mock>);
+		const factMock = (memory.recallFacts as ReturnType<typeof mock>);
+
+		expect(episodeMock.mock.calls[0][1]).toMatchObject({ minScore: 0.3 });
+		expect(factMock.mock.calls[0][1]).toMatchObject({ minScore: 0.45 });
 	});
 });

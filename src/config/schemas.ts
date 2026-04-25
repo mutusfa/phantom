@@ -169,6 +169,8 @@ export const MemoryConfigSchema = z.object({
 			episode_limit: z.number().int().positive().default(4),
 			fact_limit: z.number().int().positive().default(8),
 			procedure_limit: z.number().int().positive().default(2),
+			episode_min_score: z.number().min(0).max(1).default(0.3),
+			fact_min_score: z.number().min(0).max(1).default(0.45),
 		})
 		.default({}),
 });
